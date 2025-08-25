@@ -1,0 +1,357 @@
+"""chembl_client
+====================
+
+Utility functions to query the ChEMBL API for target and assay
+information.  This module rewrites the original Power Query (M)
+implementation in Python and exposes a small set of helpers for
+retrieving data and augmenting :class:`pandas.DataFrame` objects.
+
+The functions are intentionally resilient: network errors or malformed
+responses result in empty structures being returned.  Errors are logged so
+that callers may inspect the cause.
+
+The public API is comprised of the following functions:
+
+``get_target``
+    Fetch a single target description.
+``get_targets``
+    Retrieve multiple target descriptions at once.
+``get_assay``
+    Fetch information about a single assay.
+``get_assays``
+    Retrieve multiple assay descriptions at once.
+``extend_target``
+    Augment a DataFrame with columns returned from ``get_target``.
+
+Example
+-------
+>>> from mylib.chembl_client import get_target
+>>> get_target("CHEMBL25")
+{'pref_name': 'Mu opioid receptor', ...}
+
+The module uses :mod:`requests` for HTTP calls and expects responses in
+JSON format.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable, List, Tuple
+
+import logging
+import requests
+import pandas as pd
+
+# Configure module level logger
+logger = logging.getLogger(__name__)
+
+# ----------------------------
+# ChEMBL Target utilities
+# ----------------------------
+
+TARGET_FIELDS = [
+    "pref_name",
+    "target_chembl_id",
+    "component_description",
+    "component_id",
+    "relationship",
+    "gene",
+    "chembl_alternative_name",
+    "ec_code",
+    "HGNC_name",
+    "HGNC_id",
+]
+
+EMPTY_TARGET: Dict[str, str] = {field: "" for field in TARGET_FIELDS}
+
+
+def _parse_gene_synonyms(synonyms: List[Dict[str, str]]) -> str:
+    """Return a sorted, pipe separated list of gene synonyms."""
+    names = {
+        s["component_synonym"]
+        for s in synonyms
+        if s.get("syn_type") in {"GENE_SYMBOL", "GENE_SYMBOL_OTHER"}
+    }
+    return "|".join(sorted(names))
+
+
+def _parse_ec_codes(synonyms: List[Dict[str, str]]) -> str:
+    """Return a sorted, pipe separated list of EC numbers."""
+    codes = {s["component_synonym"] for s in synonyms if s.get("syn_type") == "EC_NUMBER"}
+    return "|".join(sorted(codes))
+
+
+def _parse_alt_names(synonyms: List[Dict[str, str]]) -> str:
+    """Return a sorted, pipe separated list of UniProt alternative names."""
+    names = {s["component_synonym"] for s in synonyms if s.get("syn_type") == "UNIPROT"}
+    return "|".join(sorted(names))
+
+
+def _parse_hgnc(xrefs: List[Dict[str, str]]) -> Tuple[str, str]:
+    """Extract HGNC name and identifier from a list of cross references."""
+    for x in xrefs:
+        if x.get("xref_src_db") == "HGNC":
+            name = x.get("xref_name", "")
+            ident = x.get("xref_id", "")
+            hgnc_id = ident.split(":")[-1] if ident else ""
+            return name, hgnc_id
+    return "", ""
+
+
+def _get_items(container: Any, key: str) -> List[Any]:
+    """Return a list of items from a container that may be a dict or list."""
+    if isinstance(container, dict):
+        items = container.get(key, [])
+    else:
+        items = container or []
+
+    if isinstance(items, dict):
+        return [items]
+    if isinstance(items, list):
+        return items
+    return []
+
+
+def _parse_target_record(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Transform a raw target record into a flat dictionary."""
+    components = _get_items(data.get("target_components"), "target_component")
+    if not components:
+        logger.debug("No components found in target record: %s", data)
+        return dict(EMPTY_TARGET)
+
+    comp = components[0]
+    synonyms = _get_items(
+        comp.get("target_component_synonyms"), "target_component_synonym"
+    )
+    xrefs = _get_items(comp.get("target_component_xrefs"), "target")
+
+    gene = _parse_gene_synonyms(synonyms)
+    ec_code = _parse_ec_codes(synonyms)
+    alt_name = _parse_alt_names(synonyms)
+    hgnc_name, hgnc_id = _parse_hgnc(xrefs)
+
+    return {
+        "pref_name": data.get("pref_name", ""),
+        "target_chembl_id": data.get("target_chembl_id", ""),
+        "component_description": comp.get("component_description", ""),
+        "component_id": comp.get("component_id", ""),
+        "relationship": comp.get("relationship", ""),
+        "gene": gene,
+        "chembl_alternative_name": alt_name,
+        "ec_code": ec_code,
+        "HGNC_name": hgnc_name,
+        "HGNC_id": hgnc_id,
+    }
+
+
+def get_target(chembl_target_id: str) -> Dict[str, Any]:
+    """Fetch target data from ChEMBL for a single identifier.
+
+    Parameters
+    ----------
+    chembl_target_id:
+        ChEMBL target identifier.
+
+    Returns
+    -------
+    dict
+        A dictionary containing information about the target.  If the
+        request fails an empty dictionary with pre-defined keys is returned.
+    """
+    if chembl_target_id in {"", "#N/A"}:
+        return dict(EMPTY_TARGET)
+
+    url = (
+        f"https://www.ebi.ac.uk/chembl/api/data/target/{chembl_target_id}?format=json"
+    )
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException as exc:  # pragma: no cover - network
+        logger.warning("Target request failed for %s: %s", chembl_target_id, exc)
+        return dict(EMPTY_TARGET)
+
+    try:
+        data = response.json()
+    except ValueError as exc:  # pragma: no cover - malformed JSON
+        logger.warning("Failed to decode JSON for target %s: %s", chembl_target_id, exc)
+        return dict(EMPTY_TARGET)
+    return _parse_target_record(data)
+
+
+def get_targets(ids: Iterable[str]) -> pd.DataFrame:
+    """Fetch target records for ``ids`` in a single request.
+
+    Parameters
+    ----------
+    ids:
+        Target identifiers to retrieve.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame with one row per identifier.
+    """
+    valid = [i for i in ids if i not in {"", "#N/A"}]
+    if not valid:
+        return pd.DataFrame(columns=TARGET_FIELDS)
+
+    url = (
+        "https://www.ebi.ac.uk/chembl/api/data/target.json?format=json&target_chembl_id__in="
+        + ",".join(valid)
+    )
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException as exc:  # pragma: no cover - network
+        logger.warning("Bulk target request failed: %s", exc)
+        return pd.DataFrame(columns=TARGET_FIELDS)
+
+    try:
+        data = response.json()
+    except ValueError as exc:  # pragma: no cover - malformed JSON
+        logger.warning("Failed to decode JSON for targets: %s", exc)
+        return pd.DataFrame(columns=TARGET_FIELDS)
+
+    items = data.get("targets") or data.get("target") or []
+    records = [_parse_target_record(item) for item in items]
+    df = pd.DataFrame(records)
+    return df.reindex(columns=TARGET_FIELDS)
+
+
+# ----------------------------
+# Assay utilities
+# ----------------------------
+
+ASSAY_URL = (
+    "https://www.ebi.ac.uk/chembl/api/data/assay/{id}?format=json&variant_sequence__isnull=false"
+)
+
+ASSAY_COLUMNS = [
+    "aidx",
+    "assay_category",
+    "assay_cell_type",
+    "assay_chembl_id",
+    "assay_classifications",
+    "assay_group",
+    "assay_organism",
+    "assay_parameters",
+    "assay_strain",
+    "assay_subcellular_fraction",
+    "assay_tax_id",
+    "assay_test_type",
+    "assay_tissue",
+    "assay_type",
+    "assay_type_description",
+    "bao_format",
+    "bao_label",
+    "cell_chembl_id",
+    "confidence_score",
+    "description",
+    "document_chembl_id",
+    "src_assay_id",
+    "src_id",
+    "relationship_type",
+    "target_chembl_id",
+    "tissue_chembl_id",
+    "variant_sequence.isoform",
+    "variant_sequence.mutation",
+    "variant_sequence.sequence",
+]
+
+
+def get_assay(chembl_assay_id: str) -> pd.DataFrame:
+    """Retrieve assay information as a DataFrame.
+
+    Parameters
+    ----------
+    chembl_assay_id:
+        ChEMBL assay identifier.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A single-row DataFrame with assay information.  If the request
+        fails an empty DataFrame with predefined columns is returned.
+    """
+    if chembl_assay_id in {"", "#N/A"}:
+        return pd.DataFrame(columns=ASSAY_COLUMNS)
+
+    url = ASSAY_URL.format(id=chembl_assay_id)
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException as exc:  # pragma: no cover - network
+        logger.warning("Assay request failed for %s: %s", chembl_assay_id, exc)
+        return pd.DataFrame(columns=ASSAY_COLUMNS)
+
+    try:
+        data = response.json()
+    except ValueError as exc:  # pragma: no cover - malformed JSON
+        logger.warning("Failed to decode JSON for assay %s: %s", chembl_assay_id, exc)
+        return pd.DataFrame(columns=ASSAY_COLUMNS)
+    df = pd.json_normalize(data)
+    df = df.reindex(columns=ASSAY_COLUMNS)
+    return df
+
+
+def get_assays(ids: Iterable[str]) -> pd.DataFrame:
+    """Fetch assay records for ``ids`` in a single request."""
+    valid = [i for i in ids if i not in {"", "#N/A"}]
+    if not valid:
+        return pd.DataFrame(columns=ASSAY_COLUMNS)
+
+    url = (
+        "https://www.ebi.ac.uk/chembl/api/data/assay.json?format=json&variant_sequence__isnull=false&assay_chembl_id__in="
+        + ",".join(valid)
+    )
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException as exc:  # pragma: no cover - network
+        logger.warning("Bulk assay request failed: %s", exc)
+        return pd.DataFrame(columns=ASSAY_COLUMNS)
+
+    try:
+        data = response.json()
+    except ValueError as exc:  # pragma: no cover - malformed JSON
+        logger.warning("Failed to decode JSON for assays: %s", exc)
+        return pd.DataFrame(columns=ASSAY_COLUMNS)
+
+    items = data.get("assays") or data.get("assay") or []
+    df = pd.json_normalize(items)
+    return df.reindex(columns=ASSAY_COLUMNS)
+
+
+def extend_target(df: pd.DataFrame, chembl_column: str = "task_chembl_id") -> pd.DataFrame:
+    """Augment a DataFrame with target information.
+
+    Parameters
+    ----------
+    df:
+        Input table containing a column with ChEMBL target IDs.
+    chembl_column:
+        Name of the column holding the target IDs. Default is
+        ``"task_chembl_id"``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Original data combined with the expanded target information.
+    """
+    target_data = df[chembl_column].apply(get_target).apply(pd.Series)
+    target_data = target_data.rename(
+        columns={
+            "pref_name": "chembl_pref_name",
+            "target_chembl_id": "chembl_target_chembl_id",
+            "component_description": "chembl_component_description",
+            "component_id": "chembl_component_id",
+            "relationship": "chembl_relationship",
+            "gene": "chembl_gene",
+            "chembl_alternative_name": "chembl_alternative_name",
+            "ec_code": "chembl_ec_code",
+            "HGNC_name": "chembl_HGNC_name",
+            "HGNC_id": "chembl_HGNC_id",
+        }
+    )
+    return pd.concat([df.reset_index(drop=True), target_data], axis=1)
+

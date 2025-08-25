@@ -1,0 +1,26 @@
+{
+  "pref_name": "Sample Target",
+  "target_chembl_id": "CHEMBL123",
+  "target_components": {
+    "target_component": {
+      "component_description": "Example component",
+      "component_id": 1,
+      "relationship": "SINGLE PROTEIN",
+      "target_component_synonyms": {
+        "target_component_synonym": [
+          {"component_synonym": "GENE1", "syn_type": "GENE_SYMBOL"},
+          {"component_synonym": "GENE_ONE", "syn_type": "GENE_SYMBOL_OTHER"},
+          {"component_synonym": "1.2.3.4", "syn_type": "EC_NUMBER"},
+          {"component_synonym": "ALT1", "syn_type": "UNIPROT"}
+        ]
+      },
+      "target_component_xrefs": {
+        "target": {
+          "xref_src_db": "HGNC",
+          "xref_name": "Gene1",
+          "xref_id": "HGNC:1"
+        }
+      }
+    }
+  }
+}

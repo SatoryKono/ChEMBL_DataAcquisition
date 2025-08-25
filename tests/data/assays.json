@@ -1,0 +1,37 @@
+{
+  "assays": [
+    {
+      "aidx": 1,
+      "assay_category": "B",
+      "assay_cell_type": "Cell",
+      "assay_chembl_id": "CHEMBL1",
+      "assay_classifications": [],
+      "assay_group": 1,
+      "assay_organism": "Human",
+      "assay_parameters": [],
+      "assay_strain": null,
+      "assay_subcellular_fraction": null,
+      "assay_tax_id": 9606,
+      "assay_test_type": null,
+      "assay_tissue": "Liver",
+      "assay_type": "B",
+      "assay_type_description": "Binding",
+      "bao_format": "format",
+      "bao_label": "label",
+      "cell_chembl_id": "CHEMBL_CELL",
+      "confidence_score": 9,
+      "description": "desc",
+      "document_chembl_id": "CHEMBL_DOC",
+      "src_assay_id": "SRC_ASSAY",
+      "src_id": 1,
+      "relationship_type": "type",
+      "target_chembl_id": "CHEMBL_TGT",
+      "tissue_chembl_id": "CHEMBL_TISSUE",
+      "variant_sequence": {
+        "isoform": "iso",
+        "mutation": "mut",
+        "sequence": "SEQ"
+      }
+    }
+  ]
+}
