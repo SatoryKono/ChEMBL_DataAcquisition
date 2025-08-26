@@ -559,17 +559,26 @@ def extract_activity(data: Any) -> Dict[str, str]:
     }
 
 
-def iter_ids(csv_path: str) -> Iterable[str]:
+def iter_ids(csv_path: str, sep: str = ",", encoding: str = "utf-8") -> Iterable[str]:
     """Yield UniProt IDs from a CSV file with a ``uniprot_id`` column.
 
-    Args:
-        csv_path: Path to a CSV file containing a ``uniprot_id`` column.
+    Parameters
+    ----------
+    csv_path:
+        Path to a CSV file containing a ``uniprot_id`` column.
+    sep:
+        Field delimiter used in ``csv_path``. Defaults to a comma.
+    encoding:
+        Text encoding of ``csv_path``. Defaults to UTF-8.
 
-    Yields:
-        Each UniProt accession ID as a string.
+    Yields
+    ------
+    str
+        Each UniProt accession ID.
     """
-    with open(csv_path, newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
+
+    with open(csv_path, newline="", encoding=encoding) as handle:
+        reader = csv.DictReader(handle, delimiter=sep)
         if "uniprot_id" not in reader.fieldnames:
             raise ValueError("Input CSV must have a uniprot_id column")
         for row in reader:
@@ -677,7 +686,14 @@ def collect_info(uid: str, data_dir: str = "uniprot") -> Dict[str, str]:
     return result
 
 
-def process(input_csv: str, output_csv: str, data_dir: str = "uniprot") -> None:
+def process(
+    input_csv: str,
+    output_csv: str,
+    data_dir: str = "uniprot",
+    *,
+    sep: str = ",",
+    encoding: str = "utf-8",
+) -> None:
     """Read IDs from ``input_csv`` and write extracted data to ``output_csv``.
 
     The output includes names, taxonomy, keyword categories, EC numbers,
@@ -685,16 +701,27 @@ def process(input_csv: str, output_csv: str, data_dir: str = "uniprot") -> None:
     catalytic reactions with EC numbers, and selected database cross references
     for each accession.
 
-    Args:
-        input_csv: Path to the CSV file listing UniProt IDs.
-        output_csv: Destination path for the output CSV file.
-        data_dir: Directory where JSON files for each ID are stored.
+    Parameters
+    ----------
+    input_csv:
+        Path to the CSV file listing UniProt IDs.
+    output_csv:
+        Destination path for the output CSV file.
+    data_dir:
+        Directory where JSON files for each ID are stored.
+    sep:
+        Field delimiter used for both input and output CSV files. Defaults to a comma.
+    encoding:
+        File encoding for both input and output CSV files. Defaults to UTF-8.
 
-    Returns:
-        None. The processed information is written to ``output_csv``.
+    Returns
+    -------
+    None
+        The processed information is written to ``output_csv``.
     """
-    rows = [collect_info(uid, data_dir) for uid in iter_ids(input_csv)]
-    with open(output_csv, "w", newline="", encoding="utf-8") as handle:
+
+    rows = [collect_info(uid, data_dir) for uid in iter_ids(input_csv, sep=sep, encoding=encoding)]
+    with open(output_csv, "w", newline="", encoding=encoding) as handle:
         fieldnames = [
             "uniprot_id",
             "names",
@@ -732,6 +759,6 @@ def process(input_csv: str, output_csv: str, data_dir: str = "uniprot") -> None:
             "reactions",
             "reaction_ec_numbers",
         ]
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter=sep)
         writer.writeheader()
         writer.writerows(rows)
