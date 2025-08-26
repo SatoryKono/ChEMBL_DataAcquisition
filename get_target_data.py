@@ -1,41 +1,14 @@
-"""Command line interface for ChEMBL data retrieval.
-
-The script reads ChEMBL identifiers from a CSV file and downloads target,
-assay, or document information from the ChEMBL REST API. Results are stored
-in a CSV file. It demonstrates the use of :mod:`script` utilities.
-
-Example
--------
-Fetch target records listed in ``ids.csv`` and write them to ``out.csv``::
-
-    python get_chembl_data.py --type target --input ids.csv --output out.csv
-"""
+"""Command line interface for retrieving target data from external sources."""
 
 from __future__ import annotations
 
 import argparse
+import csv
 import logging
-import sys
-
-import argparse
-import logging
-from pathlib import Path
-
 from pathlib import Path
 from typing import Sequence
 
-from library import chembl_library as cc
 from library import uniprot_library as uu
-from library.iuphar_library import IUPHARClassifier, IUPHARData
-
-
-
-from __future__ import annotations
-
-from pathlib import Path
-import csv
-
-
 def read_ids(
     path: str | Path,
     column: str = "chembl_id",
@@ -83,53 +56,52 @@ def read_ids(
         raise ValueError(f"malformed CSV in file: {path}: {exc}") from exc
 
 def build_parser() -> argparse.ArgumentParser:
-    """Create the CLI argument parser."""
-    parser = argparse.ArgumentParser(description="IUPHAR data utilities")
-    parser.add_argument(
-        "--target-file",
-        type=Path,
-        default=Path("IUPHAR/_IUPHAR_target.csv"),
-        help="Path to _IUPHAR_target.csv",
-    )
-    parser.add_argument(
-        "--family-file",
-        type=Path,
-        default=Path("IUPHAR/_IUPHAR_family.csv"),
-        help="Path to _IUPHAR_family.csv",
-    )
-    parser.add_argument("--target-id", help="Target ID for family lookup")
-    parser.add_argument("--uniprot", help="UniProt accession for ID lookup")
-    parser.add_argument(
-        "--uniprot-file",
-        type=Path,
-        help="CSV file containing a uniprot_id column",
-    )
-    parser.add_argument(
-        "--column",
-        default="chembl_id",
-        help="Name of the column with identifiers",
-    )
-    parser.add_argument(
-        "--sep",
-        default=",",
-        help="CSV delimiter",
-    )
-    parser.add_argument(
-        "--encoding",
-        default="utf8",
-        help="CSV file encoding",
-    )
+    """Create and return the top-level CLI argument parser.
 
-    parser.add_argument(
-        "--output-file",
-        type=Path,
-        help="Output CSV file for UniProt mappings",
-    )
+    The command line interface is organised in sub-commands.  Only the
+    ``uniprot`` sub-command is currently implemented and allows batch
+    processing of UniProt identifiers contained in a CSV file.
+    """
+
+    parser = argparse.ArgumentParser(description="Target data utilities")
     parser.add_argument(
         "--log-level",
         default="INFO",
         help="Logging level (DEBUG, INFO, WARNING)",
     )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    uniprot = subparsers.add_parser(
+        "uniprot", help="Extract information for UniProt accessions"
+    )
+    uniprot.add_argument(
+        "input_csv",
+        type=Path,
+        help="CSV file containing a 'uniprot_id' column",
+    )
+    uniprot.add_argument(
+        "output_csv",
+        type=Path,
+        help="Destination CSV file for the extracted information",
+    )
+    uniprot.add_argument(
+        "--sep",
+        default=",",
+        help="CSV delimiter used for input and output files",
+    )
+    uniprot.add_argument(
+        "--encoding",
+        default="utf8",
+        help="File encoding for input and output CSV files",
+    )
+    uniprot.add_argument(
+        "--data-dir",
+        default="uniprot",
+        help="Directory containing '<uniprot_id>.json' files",
+    )
+    uniprot.set_defaults(func=run_uniprot)
+
     return parser
 
 def configure_logging(level: str) -> None:
@@ -149,45 +121,41 @@ def configure_logging(level: str) -> None:
     logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO))
 
 
-def get_chembl_data(argv: Sequence[str] | None = None) -> int:
-    """Entry point for command line execution.
+def run_uniprot(args: argparse.Namespace) -> int:
+    """Execute the ``uniprot`` sub-command.
 
     Parameters
     ----------
-    argv:
-        Optional sequence of command line arguments.
+    args:
+        Parsed command-line arguments specific to the ``uniprot`` sub-command.
 
     Returns
     -------
     int
         Zero on success, non-zero on failure.
     """
-    args = parse_args(argv)
-    configure_logging(args.log_level)
 
-    try:
-        ids = read_ids(
-            args.input, column=args.column, sep=args.sep, encoding=args.encoding
-        )
-    except (FileNotFoundError, ValueError) as exc:
-        logging.error("Failed to read identifiers: %s", exc)
-        return 1
-    
-        df = cc.get_targets(ids)
-    
-
-    try:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(args.output, index=False, encoding=args.encoding)
-    except OSError as exc:
-        logging.error("Failed to write output to %s: %s", args.output, exc)
-        return 1
-
-    logging.info("Wrote %d records to %s", len(df), args.output)
+    uu.process(
+        input_csv=str(args.input_csv),
+        output_csv=str(args.output_csv),
+        data_dir=str(args.data_dir),
+        sep=args.sep,
+        encoding=args.encoding,
+    )
     return 0
 
-def get_uniprot_data(argv: Sequence[str] | None = None) -> int:
-    return uu.process(input_csv, output_csv)
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Command line entry point."""
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    configure_logging(args.log_level)
+    if hasattr(args, "func"):
+        return args.func(args)
+    parser.print_help()
+    return 1
+
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point
     raise SystemExit(main())
