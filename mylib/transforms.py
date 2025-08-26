@@ -166,19 +166,20 @@ class IUPHARData:
         *,
         encoding: str = "utf-8",
     ) -> pd.DataFrame:
-        """Map UniProt accessions from *input_path* and write results.
+        """Map UniProt IDs to classification data and write a CSV output.
 
-        The input CSV must contain a column named ``uniprot_id``. For each
-        accession the corresponding ``target_id`` is looked up along with the
-        full family ID and name paths. The resulting table is written to
-        ``output_path`` and also returned.
+        The input CSV must contain a ``uniprot_id`` column. Each accession is
+        translated to the corresponding IUPHAR target identifier and a full
+        classification record. The resulting table includes the target ID,
+        class, subclass, and family chain in addition to the full ID and name
+        paths.
 
         Parameters
         ----------
         input_path:
             CSV file with a ``uniprot_id`` column.
         output_path:
-            Where to write the resulting CSV file.
+            Destination for the enriched CSV file.
         encoding:
             Encoding used for both reading and writing. Defaults to UTF-8.
 
@@ -192,7 +193,35 @@ class IUPHARData:
         if "uniprot_id" not in df.columns:
             raise ValueError("Input file must contain 'uniprot_id' column")
 
+        classifier = IUPHARClassifier(self)
+
         df["target_id"] = df["uniprot_id"].apply(self.target_id_by_uniprot)
+
+        def _classify(tid: str) -> pd.Series:
+            if not tid:
+                return pd.Series(
+                    {
+                        "IUPHAR_family_id": "",
+                        "IUPHAR_type": "",
+                        "IUPHAR_class": "",
+                        "IUPHAR_subclass": "",
+                        "IUPHAR_chain": "",
+                    }
+                )
+            record = classifier.by_target_id(tid)
+            return pd.Series(
+                {
+                    "IUPHAR_family_id": record.IUPHAR_family_id,
+                    "IUPHAR_type": record.IUPHAR_type,
+                    "IUPHAR_class": record.IUPHAR_class,
+                    "IUPHAR_subclass": record.IUPHAR_subclass,
+                    "IUPHAR_chain": ">".join(record.IUPHAR_tree),
+                }
+            )
+
+        class_df = df["target_id"].apply(_classify)
+        df = pd.concat([df, class_df], axis=1)
+
         df["full_id_path"] = df["target_id"].apply(self.all_id)
         df["full_name_path"] = df["target_id"].apply(self.all_name)
 
@@ -584,6 +613,19 @@ class IUPHARClassifier:
             return ClassificationRecord()
         family_id = self.data.from_target_family_id(iuphar_target_id)
         return self.set_record(iuphar_target_id, family_id, optional_name or "")
+
+    def by_uniprot_id(self, uniprot_id: str) -> ClassificationRecord:
+        """Classify a UniProt accession.
+
+        The function resolves the accession to a target identifier and then
+        delegates to :meth:`by_target_id`. If the accession cannot be mapped,
+        a default :class:`ClassificationRecord` is returned.
+        """
+
+        target_id = self.data.target_id_by_uniprot(uniprot_id)
+        if not target_id:
+            return ClassificationRecord()
+        return self.by_target_id(target_id)
 
     def by_family_id(
         self, iuphar_family_id: str, optional_name: Optional[str] = None

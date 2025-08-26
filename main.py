@@ -6,7 +6,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from mylib.transforms import IUPHARData
+from mylib.transforms import IUPHARClassifier, IUPHARData
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,13 +50,17 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
     data = IUPHARData.from_files(args.target_file, args.family_file)
+    classifier = IUPHARClassifier(data)
 
     if args.uniprot:
-        tid = data.target_id_by_uniprot(args.uniprot)
-        print(f"Target ID for UniProt {args.uniprot}: {tid}")
+        rec = classifier.by_uniprot_id(args.uniprot)
+        print(f"Target ID for UniProt {args.uniprot}: {rec.IUPHAR_target_id}")
+        print(f"Family chain for target {rec.IUPHAR_target_id}: {rec.IUPHAR_tree}")
+        print(f"Full ID path: {data.all_id(rec.IUPHAR_target_id)}")
+        print(f"Full name path: {data.all_name(rec.IUPHAR_target_id)}")
 
     if args.uniprot_file and args.output_file:
-        data.map_uniprot_file(args.uniprot_file, args.output_file)
+        classifier.data.map_uniprot_file(args.uniprot_file, args.output_file)
         print(f"Results written to {args.output_file}")
 
     if args.target_id:

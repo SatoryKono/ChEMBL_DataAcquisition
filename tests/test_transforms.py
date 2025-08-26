@@ -51,6 +51,8 @@ def test_uniprot_file_processing(tmp_path: Path) -> None:
         "Target Three#Family Two>Family One",
         "",
     ]
+    assert "IUPHAR_class" in out.columns
+    assert list(out["IUPHAR_chain"]) == ["F1", "F2>F1", ""]
 
 
 def test_classify_by_target() -> None:
@@ -60,6 +62,14 @@ def test_classify_by_target() -> None:
     assert rec.IUPHAR_target_id == "T1"
     assert rec.IUPHAR_family_id == "F1"
     assert rec.IUPHAR_tree == ["F1"]
+
+
+def test_classify_by_uniprot() -> None:
+    data = load_data()
+    classifier = IUPHARClassifier(data)
+    rec = classifier.by_uniprot_id("Q11111")
+    assert rec.IUPHAR_target_id == "T1"
+    assert rec.IUPHAR_family_id == "F1"
 
 
 def test_classify_by_name_heuristic() -> None:

@@ -13,7 +13,10 @@ pip install -r requirements.txt
 The project ships both a reusable library and a small command line interface.
 
 ```bash
-python main.py --uniprot Q11111 --target-id T1
+python main.py \
+    --target-file tests/data/target.csv \
+    --family-file tests/data/family.csv \
+    --uniprot Q11111
 ```
 
 Batch process UniProt accessions from a CSV file containing a ``uniprot_id``
@@ -26,6 +29,10 @@ python main.py \
     --uniprot-file tests/data/uniprot_input.csv \
     --output-file results.csv
 ```
+
+The resulting file includes the resolved ``target_id`` together with the
+IUPHAR classification (class, subclass and family chain) for each UniProt
+accession.
 
 ## Development
 
