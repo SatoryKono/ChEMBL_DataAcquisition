@@ -83,3 +83,128 @@ mypy --explicit-package-bases get_target_data.py library
 A small `targets.csv` file is provided in the repository containing a
 `chembl_id` column for smoke testing.
 
+
+Project structure and purpose of modules
+chembl_library.py
+
+Role: utilities for retrieving targets, assays, and documents from ChEMBL, with wrappers for assembling results into pandas.DataFrame.
+
+Key functions:
+
+get_target(chembl_target_id) / get_targets(ids, chunk_size=50) — fetch single/multiple targets, normalize fields (name, ChEMBL ID, HGNC, EC, etc.), robust to network errors.
+
+get_assay(chembl_assay_id) / get_assays(ids, chunk_size=50) — load and normalize assay records.
+
+get_document(chembl_document_id) / get_documents(ids, chunk_size=50) — publication metadata from ChEMBL.
+
+extend_target(df, chembl_column="task_chembl_id", chunk_size=50) — join an input table with extended ChEMBL target information.
+
+iuphar_library.py
+
+Role: core for working with preprocessed IUPHAR CSV: loading target/family tables, building classification chains, mapping UniProt ? IUPHAR, heuristic classification by EC/name.
+
+Key components:
+
+Data loading and validation:
+
+load_targets(path), load_families(path) — read CSV as strings, normalize headers, validate required columns.
+
+IUPHARData.from_files(target_path, family_path) — container with target_df and family_df.
+
+Navigation and mapping:
+
+family_chain(start_id) — build parent_family_id chain.
+
+target_id_by_uniprot / hgnc_name / hgnc_id / gene / name — map target IDs by identifiers and synonyms.
+
+family_id_by_name, all_id, all_name — recover full ID/name paths.
+
+Batch mapping:
+
+map_uniprot_file(input_csv, output_csv, sep=",", encoding="utf-8") — read UniProt CSV, resolve to IUPHAR, add type/class/subclass, chain, full paths, write output.
+
+Classification:
+
+ClassificationRecord — classification result structure.
+
+IUPHARClassifier with methods by_target_id, by_uniprot_id, by_family_id, by_ec_number, by_name, and get(...).
+
+pubchem_library.py
+
+Role: client for the PubChem REST API: CID lookup, compound names, properties, and structured records.
+
+Key functions:
+
+Utilities: url_encode, make_request(url, delay=3.0), validate_cid.
+
+CID lookup: get_cid(compound_name) (exact), get_all_cid(compound_name) (partial).
+
+Metadata: get_standard_name(cid), get_properties(cid) ? Properties (IUPAC, formula, SMILES, InChI/Key).
+
+Pipeline: process_compound(compound_name) — single call to retrieve all fields.
+
+uniprot_library.py
+
+Role: parsing UniProt JSON and batch processing local annotation files.
+
+Key functions:
+
+Load: fetch_uniprot(uniprot_id) — direct REST request.
+
+Extract from entry:
+
+extract_names(data) — protein and gene names.
+
+extract_organism(data) — taxonomy (genus, superkingdom, phylum, taxon_id).
+
+extract_keywords(data) — MF/CC keywords, EC, subcellular location, topology, membrane flags.
+
+extract_ptm(data) — PTM feature flags.
+
+extract_isoform(data) — isoform names/IDs/synonyms.
+
+extract_crossrefs(data) — selected external DBs.
+
+extract_activity(data) — catalytic reactions and EC numbers.
+
+Streams:
+
+iter_ids(csv_path, ...) — yield UniProt IDs from CSV.
+
+collect_info(uid, data_dir="uniprot") — gather all fields from local <uid>.json.
+
+process(input_csv, output_csv, data_dir="uniprot", ...) — batch processing to CSV.
+
+get_target_data.py
+
+Role: CLI wrapper around UniProt/ChEMBL/IUPHAR libraries.
+
+Key parts:
+
+read_ids(path, column="chembl_id", ...) — safe reading of IDs from CSV.
+
+build_parser() — defines CLI with subcommands:
+
+uniprot ? calls uniprot_library.process.
+
+chembl ? reads IDs and calls chembl_library.get_targets.
+
+iuphar ? uses IUPHARData.from_files and map_uniprot_file.
+
+Runtime: configure_logging, run_uniprot, run_chembl, run_iuphar, main.
+
+Module interaction
+
+CLI (get_target_data.py) — entry point.
+
+uniprot subcommand ? uniprot_library.process.
+
+chembl subcommand ? chembl_library.get_targets.
+
+iuphar subcommand ? IUPHARData + map_uniprot_file.
+
+Tests
+
+test_iuphar_mapping.py — verifies map_uniprot_file maps UniProt ID to target ID and writes expected CSV.
+
+test_read_ids.py — validates read_ids: filtering of empty/#N/A, error when column missing.
