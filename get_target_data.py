@@ -218,7 +218,7 @@ def run_uniprot(args: argparse.Namespace) -> int:
             encoding=args.encoding,
         )
         return 0
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, OSError) as exc:
         logger.error("%s", exc)
         return 1
 
@@ -259,7 +259,7 @@ def run_iuphar(args: argparse.Namespace) -> int:
             sep=args.sep,
         )
         return 0
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, OSError) as exc:
         logger.error("%s", exc)
         return 1
 

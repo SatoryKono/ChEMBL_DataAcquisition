@@ -36,10 +36,13 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 from typing import Any, Dict, Iterable, List, Set
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 API_URL = "https://rest.uniprot.org/uniprotkb/{id}.json"
 
@@ -61,20 +64,28 @@ __all__ = [
 def fetch_uniprot(uniprot_id: str) -> Dict[str, Any]:
     """Fetch a UniProt JSON record from the public REST API.
 
-    Args:
-        uniprot_id: UniProt accession identifier to retrieve.
+    Parameters
+    ----------
+    uniprot_id:
+        UniProt accession identifier to retrieve.
 
-    Returns:
-        The JSON-decoded response as a dictionary.
-
-    Raises:
-        requests.HTTPError: If the HTTP request returned an unsuccessful
-            status code.
+    Returns
+    -------
+    dict
+        JSON-decoded response.  An empty dictionary is returned when the
+        request fails or the payload cannot be decoded.
     """
+
     url = API_URL.format(id=uniprot_id)
-    resp = requests.get(url)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:  # pragma: no cover - network
+        logger.warning("UniProt request failed for %s: %s", uniprot_id, exc)
+    except json.JSONDecodeError as exc:  # pragma: no cover - malformed JSON
+        logger.warning("Failed to decode JSON for UniProt %s: %s", uniprot_id, exc)
+    return {}
 
 
 def _collect_name_fields(name_obj: Dict[str, Any]) -> Iterable[str]:
@@ -577,14 +588,19 @@ def iter_ids(csv_path: str, sep: str = ",", encoding: str = "utf-8") -> Iterable
         Each UniProt accession ID.
     """
 
-    with open(csv_path, newline="", encoding=encoding) as handle:
-        reader = csv.DictReader(handle, delimiter=sep)
-        if "uniprot_id" not in reader.fieldnames:
-            raise ValueError("Input CSV must have a uniprot_id column")
-        for row in reader:
-            uid = row.get("uniprot_id")
-            if uid:
-                yield uid.strip()
+    try:
+        with open(csv_path, newline="", encoding=encoding) as handle:
+            reader = csv.DictReader(handle, delimiter=sep)
+            if reader.fieldnames is None or "uniprot_id" not in reader.fieldnames:
+                raise ValueError("Input CSV must have a uniprot_id column")
+            for row in reader:
+                uid = row.get("uniprot_id")
+                if uid:
+                    yield uid.strip()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"input file not found: {csv_path}") from exc
+    except csv.Error as exc:
+        raise ValueError(f"malformed CSV in file: {csv_path}: {exc}") from exc
 
 
 def collect_info(uid: str, data_dir: str = "uniprot") -> Dict[str, str]:
@@ -642,47 +658,50 @@ def collect_info(uid: str, data_dir: str = "uniprot") -> Dict[str, str]:
     try:
         with open(json_path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
-        names = extract_names(data)
-        org = extract_organism(data)
-        keywords = extract_keywords(data)
-        ptm = extract_ptm(data)
-        iso = extract_isoform(data)
-        cross = extract_crossrefs(data)
-        activity = extract_activity(data)
-        result["names"] = "|".join(sorted(names))
-        result.update(org)
-        result["molecular_function"] = "|".join(
-            sorted(keywords["molecular_function"])
-        )
-        result["cellular_component"] = "|".join(
-            sorted(keywords["cellular_component"])
-        )
-        result["ec_numbers"] = "|".join(sorted(keywords["ec_numbers"]))
-        result["subcellular_location"] = "|".join(
-            sorted(keywords["subcellular_location"])
-        ) or "N/A"
-        result["topology"] = "|".join(sorted(keywords["topology"])) or "N/A"
-        result["transmembrane"] = ptm["transmembrane"]
-        result["intramembrane"] = keywords["intramembrane"]
-        for key in (
-            "glycosylation",
-            "lipidation",
-            "disulfide_bond",
-            "modified_residue",
-            "phosphorylation",
-            "acetylation",
-            "ubiquitination",
-            "signal_peptide",
-            "propeptide",
-        ):
-            result[key] = ptm[key]
-        result.update(iso)
-        result.update(cross)
-        result.update(activity)
     except FileNotFoundError:
-        pass
+        logger.warning("missing UniProt JSON for %s", uid)
+        return result
     except json.JSONDecodeError:
-        pass
+        logger.warning("malformed UniProt JSON for %s", uid)
+        return result
+
+    names = extract_names(data)
+    org = extract_organism(data)
+    keywords = extract_keywords(data)
+    ptm = extract_ptm(data)
+    iso = extract_isoform(data)
+    cross = extract_crossrefs(data)
+    activity = extract_activity(data)
+    result["names"] = "|".join(sorted(names))
+    result.update(org)
+    result["molecular_function"] = "|".join(
+        sorted(keywords["molecular_function"])
+    )
+    result["cellular_component"] = "|".join(
+        sorted(keywords["cellular_component"])
+    )
+    result["ec_numbers"] = "|".join(sorted(keywords["ec_numbers"]))
+    result["subcellular_location"] = "|".join(
+        sorted(keywords["subcellular_location"])
+    ) or "N/A"
+    result["topology"] = "|".join(sorted(keywords["topology"])) or "N/A"
+    result["transmembrane"] = ptm["transmembrane"]
+    result["intramembrane"] = keywords["intramembrane"]
+    for key in (
+        "glycosylation",
+        "lipidation",
+        "disulfide_bond",
+        "modified_residue",
+        "phosphorylation",
+        "acetylation",
+        "ubiquitination",
+        "signal_peptide",
+        "propeptide",
+    ):
+        result[key] = ptm[key]
+    result.update(iso)
+    result.update(cross)
+    result.update(activity)
     return result
 
 
@@ -720,45 +739,49 @@ def process(
         The processed information is written to ``output_csv``.
     """
 
-    rows = [collect_info(uid, data_dir) for uid in iter_ids(input_csv, sep=sep, encoding=encoding)]
-    with open(output_csv, "w", newline="", encoding=encoding) as handle:
-        fieldnames = [
-            "uniprot_id",
-            "names",
-            "genus",
-            "superkingdom",
-            "phylum",
-            "taxon_id",
-            "molecular_function",
-            "cellular_component",
-            "ec_numbers",
-            "subcellular_location",
-            "topology",
-            "transmembrane",
-            "intramembrane",
-            "glycosylation",
-            "lipidation",
-            "disulfide_bond",
-            "modified_residue",
-            "phosphorylation",
-            "acetylation",
-            "ubiquitination",
-            "signal_peptide",
-            "propeptide",
-            "isoform_names",
-            "isoform_ids",
-            "isoform_synonyms",
-            "GuidetoPHARMACOLOGY",
-            "family",
-            "SUPFAM",
-            "PROSITE",
-            "InterPro",
-            "Pfam",
-            "PRINTS",
-            "TCDB",
-            "reactions",
-            "reaction_ec_numbers",
-        ]
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter=sep)
-        writer.writeheader()
-        writer.writerows(rows)
+    fieldnames = [
+        "uniprot_id",
+        "names",
+        "genus",
+        "superkingdom",
+        "phylum",
+        "taxon_id",
+        "molecular_function",
+        "cellular_component",
+        "ec_numbers",
+        "subcellular_location",
+        "topology",
+        "transmembrane",
+        "intramembrane",
+        "glycosylation",
+        "lipidation",
+        "disulfide_bond",
+        "modified_residue",
+        "phosphorylation",
+        "acetylation",
+        "ubiquitination",
+        "signal_peptide",
+        "propeptide",
+        "isoform_names",
+        "isoform_ids",
+        "isoform_synonyms",
+        "GuidetoPHARMACOLOGY",
+        "family",
+        "SUPFAM",
+        "PROSITE",
+        "InterPro",
+        "Pfam",
+        "PRINTS",
+        "TCDB",
+        "reactions",
+        "reaction_ec_numbers",
+    ]
+
+    try:
+        with open(output_csv, "w", newline="", encoding=encoding) as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter=sep)
+            writer.writeheader()
+            for uid in iter_ids(input_csv, sep=sep, encoding=encoding):
+                writer.writerow(collect_info(uid, data_dir))
+    except OSError as exc:
+        raise OSError(f"failed to write output CSV: {output_csv}: {exc}") from exc
