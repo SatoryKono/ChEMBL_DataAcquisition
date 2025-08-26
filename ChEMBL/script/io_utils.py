@@ -48,4 +48,6 @@ def read_ids(
         raise ValueError(f"column '{column}' not found in {path}")
 
     ids = df[column].dropna().astype(str)
+
     return [i for i in ids if i and i != "#N/A"]
+
