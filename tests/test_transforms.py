@@ -9,7 +9,7 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from mylib.transforms import IUPHARData
+from mylib.transforms import IUPHARData, IUPHARClassifier
 
 
 def load_data() -> IUPHARData:
@@ -51,3 +51,29 @@ def test_uniprot_file_processing(tmp_path: Path) -> None:
         "Target Three#Family Two>Family One",
         "",
     ]
+
+
+def test_classify_by_target() -> None:
+    data = load_data()
+    classifier = IUPHARClassifier(data)
+    rec = classifier.by_target_id("T1")
+    assert rec.IUPHAR_target_id == "T1"
+    assert rec.IUPHAR_family_id == "F1"
+    assert rec.IUPHAR_tree == ["F1"]
+
+
+def test_classify_by_name_heuristic() -> None:
+    data = load_data()
+    classifier = IUPHARClassifier(data)
+    rec = classifier.by_name("Example Kinase")
+    assert rec.IUPHAR_type == "Enzyme.Transferase"
+    assert rec.IUPHAR_class == "Enzyme"
+    assert rec.IUPHAR_subclass == "Transferase"
+
+
+def test_ec_number_mapping() -> None:
+    data = load_data()
+    classifier = IUPHARClassifier(data)
+    rec = classifier.by_ec_number("1.2.3.4")
+    assert rec.IUPHAR_type == "Enzyme.Oxidoreductase"
+    assert rec.IUPHAR_tree == ["0690-1", "0690"]
