@@ -23,7 +23,19 @@ from script import io_utils as io
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
-    """Parse command line arguments."""
+    """Parse command line arguments.
+
+    Parameters
+    ----------
+    argv:
+        Optional sequence of argument strings. If ``None`` (the default), values
+        are read from :data:`sys.argv`.
+
+    Returns
+    -------
+    argparse.Namespace
+        Parsed command-line options.
+    """
     parser = argparse.ArgumentParser(description="Fetch data from ChEMBL API")
     parser.add_argument(
         "--type",
@@ -67,7 +79,13 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
 
 
 def configure_logging(level: str) -> None:
-    """Configure basic logging."""
+    """Configure basic logging.
+
+    Parameters
+    ----------
+    level:
+        Logging level name (e.g. ``"INFO"`` or ``"DEBUG"``). Case-insensitive.
+    """
     logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO))
 
 
@@ -84,7 +102,12 @@ def main(argv: Iterable[str] | None = None) -> int:
     else:
         df = cc.get_documents(ids)
 
-    df.to_csv(args.output, index=False)
+    try:
+        df.to_csv(args.output, index=False, encoding=args.encoding)
+    except OSError as exc:  # pragma: no cover - filesystem
+        logging.error("Failed to write output %s: %s", args.output, exc)
+        return 1
+
     logging.info("Wrote %d records to %s", len(df), args.output)
     return 0
 

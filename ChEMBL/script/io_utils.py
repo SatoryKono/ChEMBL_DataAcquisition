@@ -16,27 +16,35 @@ def read_ids(
 
     Parameters
     ----------
-    path : str or Path
+    path:
         Path to the CSV file.
-    column : str, optional
+    column:
         Name of the column containing identifiers. Defaults to ``"chembl_id"``.
-    sep : str, optional
+    sep:
         Field delimiter, by default a comma.
-    encoding : str, optional
+    encoding:
         File encoding, by default ``"utf8"``.
 
     Returns
     -------
-    list of str
+    list[str]
         Identifier values in the order they appear. Empty strings and ``"#N/A"``
         markers are discarded.
 
     Raises
     ------
+    FileNotFoundError
+        If ``path`` does not exist.
     ValueError
-        If ``column`` is not present in the input file.
+        If ``column`` is not present in the input file or the file is empty.
     """
-    df = pd.read_csv(path, sep=sep, encoding=encoding, dtype=str)
+    try:
+        df = pd.read_csv(path, sep=sep, encoding=encoding, dtype=str)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"file not found: {path}") from None
+    except pd.errors.EmptyDataError as exc:
+        raise ValueError(f"no data found in {path}") from exc
+
     if column not in df.columns:
         raise ValueError(f"column '{column}' not found in {path}")
 
