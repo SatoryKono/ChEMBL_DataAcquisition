@@ -69,6 +69,7 @@ TARGET_FIELDS = [
     "component_id",
     "relationship",
     "gene",
+    "uniprot_id",
     "chembl_alternative_name",
     "ec_code",
     "hgnc_name",
@@ -98,6 +99,23 @@ def _parse_alt_names(synonyms: list[dict[str, str]]) -> str:
     """Return a sorted, pipe separated list of UniProt alternative names."""
     names = {s["component_synonym"] for s in synonyms if s.get("syn_type") == "UNIPROT"}
     return "|".join(sorted(names))
+
+
+def _parse_uniprot_id(xrefs: list[dict[str, str]]) -> str:
+    """Extract a UniProt accession from a list of cross references.
+
+    The ChEMBL API may label UniProt references with slightly different
+    source database names; the check therefore normalises the label to
+    upper case and matches common variants.
+    """
+
+    for x in xrefs:
+        src = (x.get("xref_src_db") or "").upper()
+        if src in {"UNIPROT", "UNIPROT ACCESSION", "UNIPROT ACC", "UNIPROTKB"}:
+            ident = x.get("xref_id", "")
+            if ident:
+                return ident
+    return ""
 
 
 def _parse_hgnc(xrefs: list[dict[str, str]]) -> tuple[str, str]:
@@ -163,6 +181,7 @@ def _parse_target_record(data: dict[str, Any]) -> dict[str, Any]:
     gene = _parse_gene_synonyms(synonyms)
     ec_code = _parse_ec_codes(synonyms)
     alt_name = _parse_alt_names(synonyms)
+    uniprot_id = _parse_uniprot_id(xrefs)
     hgnc_name, hgnc_id = _parse_hgnc(xrefs)
 
     return {
@@ -172,6 +191,7 @@ def _parse_target_record(data: dict[str, Any]) -> dict[str, Any]:
         "component_id": comp.get("component_id", ""),
         "relationship": comp.get("relationship", ""),
         "gene": gene,
+        "uniprot_id": uniprot_id,
         "chembl_alternative_name": alt_name,
         "ec_code": ec_code,
         "hgnc_name": hgnc_name,
@@ -190,7 +210,8 @@ def get_target(chembl_target_id: str) -> dict[str, Any]:
     Returns
     -------
     dict
-        A dictionary containing information about the target.  If the
+        A dictionary containing information about the target, including
+        a ``uniprot_id`` when a UniProt cross reference is present. If the
         request fails an empty dictionary with pre-defined keys is returned.
     """
     if chembl_target_id in {"", "#N/A"}:

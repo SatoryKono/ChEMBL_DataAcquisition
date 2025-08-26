@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 from typing import Sequence
 
+import pandas as pd
+
 from library import chembl_library as cl
 from library import iuphar_library as ii
 from library import uniprot_library as uu
@@ -64,9 +66,10 @@ def read_ids(
 def build_parser() -> argparse.ArgumentParser:
     """Create and return the top-level CLI argument parser.
 
-    The command line interface is organised in sub-commands.  Only the
-    ``uniprot`` sub-command is currently implemented and allows batch
-    processing of UniProt identifiers contained in a CSV file.
+    The command line interface is organised into sub-commands for
+    retrieving data from individual sources (UniProt, ChEMBL and IUPHAR)
+    as well as a convenience ``all`` command that runs all pipelines and
+    merges their outputs.
     """
 
     parser = argparse.ArgumentParser(description="Target data utilities")
@@ -176,6 +179,66 @@ def build_parser() -> argparse.ArgumentParser:
     )
     iuphar.set_defaults(func=run_iuphar)
 
+    # ----------------------------
+    # Combined pipeline
+    # ----------------------------
+    all_cmd = subparsers.add_parser(
+        "all",
+        help="Run ChEMBL, UniProt and IUPHAR pipelines and merge results",
+    )
+    all_cmd.add_argument(
+        "input_csv",
+        type=Path,
+        help="CSV with a 'chembl_id' column",
+    )
+    all_cmd.add_argument(
+        "output_csv",
+        type=Path,
+        help="Destination CSV file for the merged table",
+    )
+    all_cmd.add_argument(
+        "--chembl-out",
+        dest="chembl_out",
+        type=Path,
+        help="Optional path to save intermediate ChEMBL data",
+    )
+    all_cmd.add_argument(
+        "--uniprot-out",
+        dest="uniprot_out",
+        type=Path,
+        help="Optional path to save intermediate UniProt data",
+    )
+    all_cmd.add_argument(
+        "--iuphar-out",
+        dest="iuphar_out",
+        type=Path,
+        help="Optional path to save intermediate IUPHAR data",
+    )
+    all_cmd.add_argument(
+        "--data-dir",
+        default="uniprot",
+        help="Directory containing '<uniprot_id>.json' files",
+    )
+    all_cmd.add_argument(
+        "--target-csv",
+        type=Path,
+        default=Path("data/_IUPHAR_target.csv"),
+        help="Path to the _IUPHAR_target.csv file",
+    )
+    all_cmd.add_argument(
+        "--family-csv",
+        type=Path,
+        default=Path("data/_IUPHAR_family.csv"),
+        help="Path to the _IUPHAR_family.csv file",
+    )
+    all_cmd.add_argument("--sep", default=",", help="CSV delimiter for I/O")
+    all_cmd.add_argument(
+        "--encoding",
+        default="utf8",
+        help="File encoding for input and output CSV files",
+    )
+    all_cmd.set_defaults(func=run_all)
+
     return parser
 
 def configure_logging(level: str) -> None:
@@ -218,7 +281,7 @@ def run_uniprot(args: argparse.Namespace) -> int:
             encoding=args.encoding,
         )
         return 0
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, OSError) as exc:
         logger.error("%s", exc)
         return 1
 
@@ -259,7 +322,107 @@ def run_iuphar(args: argparse.Namespace) -> int:
             sep=args.sep,
         )
         return 0
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        logger.error("%s", exc)
+        return 1
+
+
+def run_all(args: argparse.Namespace) -> int:
+    """Run ChEMBL, UniProt and IUPHAR pipelines and merge their outputs.
+
+    Parameters
+    ----------
+    args:
+        Parsed command-line arguments specific to the ``all`` sub-command.
+
+    Returns
+    -------
+    int
+        Zero on success, non-zero on failure.
+    """
+
+    try:
+        # Determine intermediate output paths
+        chembl_out = args.chembl_out or args.output_csv.with_name(
+            args.output_csv.stem + "_chembl.csv"
+        )
+        uniprot_out = args.uniprot_out or args.output_csv.with_name(
+            args.output_csv.stem + "_uniprot.csv"
+        )
+        iuphar_out = args.iuphar_out or args.output_csv.with_name(
+            args.output_csv.stem + "_iuphar.csv"
+        )
+
+        # Run ChEMBL retrieval and capture results
+        chembl_args = argparse.Namespace(
+            input_csv=args.input_csv,
+            output_csv=chembl_out,
+            column="chembl_id",
+            sep=args.sep,
+            encoding=args.encoding,
+        )
+        if run_chembl(chembl_args) != 0:
+            return 1
+        chembl_df = pd.read_csv(
+            chembl_out, sep=args.sep, encoding=args.encoding, dtype=str
+        ).rename(columns={"target_chembl_id": "chembl_id"})
+
+        # Extract UniProt IDs and write temporary CSV for downstream steps
+        uids = [u for u in chembl_df.get("uniprot_id", []) if isinstance(u, str) and u]
+        from tempfile import NamedTemporaryFile
+
+        with NamedTemporaryFile("w", delete=False, encoding=args.encoding, newline="") as tmp:
+            writer = csv.DictWriter(tmp, fieldnames=["uniprot_id"], delimiter=args.sep)
+            writer.writeheader()
+            for uid in uids:
+                writer.writerow({"uniprot_id": uid})
+            tmp_path = Path(tmp.name)
+
+        # Run UniProt pipeline
+        uniprot_args = argparse.Namespace(
+            input_csv=tmp_path,
+            output_csv=uniprot_out,
+            data_dir=args.data_dir,
+            sep=args.sep,
+            encoding=args.encoding,
+        )
+        try:
+            if run_uniprot(uniprot_args) != 0:
+                return 1
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        # Run IUPHAR mapping using UniProt output
+        iuphar_args = argparse.Namespace(
+            input_csv=uniprot_out,
+            output_csv=iuphar_out,
+            target_csv=args.target_csv,
+            family_csv=args.family_csv,
+            sep=args.sep,
+            encoding=args.encoding,
+        )
+        if run_iuphar(iuphar_args) != 0:
+            return 1
+
+        # Merge results using pandas
+        uniprot_df = pd.read_csv(
+            uniprot_out, sep=args.sep, encoding=args.encoding, dtype=str
+        )
+        iuphar_df = pd.read_csv(
+            iuphar_out, sep=args.sep, encoding=args.encoding, dtype=str
+        )
+        classification_cols = [
+            c for c in iuphar_df.columns if c not in {"uniprot_id", "hgnc_name"}
+        ]
+        iuphar_df = iuphar_df[["uniprot_id", *classification_cols]]
+
+        merged = chembl_df.merge(uniprot_df, on="uniprot_id", how="left")
+        merged = merged.merge(iuphar_df, on="uniprot_id", how="left")
+        merged.to_csv(
+            args.output_csv, index=False, sep=args.sep, encoding=args.encoding
+        )
+        return 0
+    except (FileNotFoundError, ValueError, OSError) as exc:
         logger.error("%s", exc)
         return 1
 
