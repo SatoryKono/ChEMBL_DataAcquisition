@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-
-import pandas as pd
+import csv
 
 
 def read_ids(
@@ -36,18 +35,18 @@ def read_ids(
         If ``column`` is not present in the input file.
     """
     try:
-        df = pd.read_csv(path, sep=sep, encoding=encoding, dtype=str)
+        with Path(path).open("r", encoding=encoding, newline="") as fh:
+            reader = csv.DictReader(fh, delimiter=sep)
+            if reader.fieldnames is None or column not in reader.fieldnames:
+                raise ValueError(f"column '{column}' not found in {path}")
+            ids: list[str] = []
+            for row in reader:
+                value = (row.get(column) or "").strip()
+                if value and value != "#N/A":
+                    ids.append(value)
+            return ids
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"input file not found: {path}") from exc
-    except pd.errors.EmptyDataError as exc:
-        raise ValueError(f"no data in file: {path}") from exc
-    except pd.errors.ParserError as exc:
+    except csv.Error as exc:
         raise ValueError(f"malformed CSV in file: {path}: {exc}") from exc
-
-    if column not in df.columns:
-        raise ValueError(f"column '{column}' not found in {path}")
-
-    ids = df[column].dropna().astype(str)
-
-    return [i for i in ids if i and i != "#N/A"]
 

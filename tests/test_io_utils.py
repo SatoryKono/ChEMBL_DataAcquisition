@@ -21,3 +21,9 @@ def test_read_ids_missing_column():
 def test_read_ids_missing_file():
     with pytest.raises(FileNotFoundError):
         read_ids(Path("does_not_exist.csv"))
+
+
+def test_read_ids_strips_whitespace(tmp_path):
+    path = tmp_path / "ids.csv"
+    path.write_text("chembl_id\n CHEMBL1 \nCHEMBL2\n", encoding="utf8")
+    assert read_ids(path) == ["CHEMBL1", "CHEMBL2"]

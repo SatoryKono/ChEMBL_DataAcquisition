@@ -16,13 +16,13 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import Iterable
+from typing import Sequence
 
 from script import chembl_lib as cc
 from script import io_utils as io
 
 
-def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse command line arguments.
 
     Parameters
@@ -95,7 +95,7 @@ def configure_logging(level: str) -> None:
     logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO))
 
 
-def main(argv: Iterable[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Entry point for command line execution.
 
     Parameters
@@ -111,9 +111,13 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
 
-    ids = io.read_ids(
-        args.input, column=args.column, sep=args.sep, encoding=args.encoding
-    )
+    try:
+        ids = io.read_ids(
+            args.input, column=args.column, sep=args.sep, encoding=args.encoding
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        logging.error("Failed to read identifiers: %s", exc)
+        return 1
     if args.type == "target":
         df = cc.get_targets(ids)
     elif args.type == "assay":

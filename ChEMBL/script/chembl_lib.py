@@ -38,11 +38,25 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 import logging
-import requests
 import pandas as pd
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Configure module level logger
 logger = logging.getLogger(__name__)
+
+# Configure a session with retry and backoff for all HTTP requests
+_retry = Retry(
+    total=3,
+    backoff_factor=1.0,
+    status_forcelist=[500, 502, 503, 504],
+    allowed_methods=["GET"],
+)
+_session = requests.Session()
+_adapter = HTTPAdapter(max_retries=_retry)
+_session.mount("http://", _adapter)
+_session.mount("https://", _adapter)
 
 # ----------------------------
 # ChEMBL Target utilities
@@ -126,6 +140,9 @@ def _chunked(items: list[str], size: int) -> Iterable[list[str]]:
     list[str]
         Slices of ``items`` with length up to ``size``.
     """
+    if size <= 0:
+        raise ValueError("size must be a positive integer")
+
     for i in range(0, len(items), size):
         yield items[i : i + size]
 
@@ -183,7 +200,7 @@ def get_target(chembl_target_id: str) -> dict[str, Any]:
         f"https://www.ebi.ac.uk/chembl/api/data/target/{chembl_target_id}?format=json"
     )
     try:
-        response = requests.get(url, timeout=30)
+        response = _session.get(url, timeout=30)
         response.raise_for_status()
     except requests.RequestException as exc:  # pragma: no cover - network
         logger.warning("Target request failed for %s: %s", chembl_target_id, exc)
@@ -225,7 +242,7 @@ def get_targets(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
             + ",".join(chunk)
         )
         try:
-            response = requests.get(url, timeout=30)
+            response = _session.get(url, timeout=30)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - network
             logger.warning("Bulk target request failed for %s: %s", chunk, exc)
@@ -307,7 +324,7 @@ def get_assay(chembl_assay_id: str) -> pd.DataFrame:
 
     url = ASSAY_URL.format(id=chembl_assay_id)
     try:
-        response = requests.get(url, timeout=30)
+        response = _session.get(url, timeout=30)
         response.raise_for_status()
     except requests.RequestException as exc:  # pragma: no cover - network
         logger.warning("Assay request failed for %s: %s", chembl_assay_id, exc)
@@ -349,7 +366,7 @@ def get_assays(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
             + ",".join(chunk)
         )
         try:
-            response = requests.get(url, timeout=30)
+            response = _session.get(url, timeout=30)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - network
             logger.warning("Bulk assay request failed for %s: %s", chunk, exc)
@@ -415,7 +432,7 @@ def get_document(chembl_document_id: str) -> pd.DataFrame:
 
     url = DOCUMENT_URL.format(id=chembl_document_id)
     try:
-        response = requests.get(url, timeout=30)
+        response = _session.get(url, timeout=30)
         response.raise_for_status()
     except requests.RequestException as exc:  # pragma: no cover - network
         logger.warning("Document request failed for %s: %s", chembl_document_id, exc)
@@ -459,7 +476,7 @@ def get_documents(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
             + ",".join(chunk)
         )
         try:
-            response = requests.get(url, timeout=30)
+            response = _session.get(url, timeout=30)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - network
             logger.warning("Bulk document request failed for %s: %s", chunk, exc)
@@ -502,6 +519,9 @@ def extend_target(
     pandas.DataFrame
         Original data combined with the expanded target information.
     """
+    if chembl_column not in df.columns:
+        raise ValueError(f"column '{chembl_column}' not found in DataFrame")
+
     ids = df[chembl_column].astype(str).tolist()
     targets = get_targets(ids, chunk_size=chunk_size)
     merged = df.merge(
