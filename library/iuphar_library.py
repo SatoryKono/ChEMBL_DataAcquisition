@@ -283,6 +283,7 @@ class IUPHARData:
         output_path: str | Path,
         *,
         encoding: str = "utf-8",
+        sep: str = ",",
     ) -> pd.DataFrame:
         """Map UniProt IDs to classification data and write a CSV output.
 
@@ -304,6 +305,8 @@ class IUPHARData:
             Destination for the enriched CSV file.
         encoding:
             Encoding used for both reading and writing. Defaults to UTF-8.
+        sep:
+            Delimiter used when reading and writing CSV files. Defaults to a comma.
 
         Returns
         -------
@@ -311,7 +314,7 @@ class IUPHARData:
             DataFrame containing the mapping results.
         """
 
-        df = pd.read_csv(input_path, dtype=str, encoding=encoding).fillna("")
+        df = pd.read_csv(input_path, dtype=str, encoding=encoding, sep=sep).fillna("")
         if "uniprot_id" not in df.columns:
             raise ValueError("Input file must contain 'uniprot_id' column")
 
@@ -380,7 +383,7 @@ class IUPHARData:
         df["full_id_path"] = df["target_id"].apply(self.all_id)
         df["full_name_path"] = df["target_id"].apply(self.all_name)
 
-        df.to_csv(output_path, index=False, encoding=encoding)
+        df.to_csv(output_path, index=False, encoding=encoding, sep=sep)
         logger.info("Wrote %d rows to %s", len(df), output_path)
         return df
 
