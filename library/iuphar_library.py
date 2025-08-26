@@ -1,4 +1,15 @@
-"""Core transformation logic for working with IUPHAR data."""
+"""Utilities for working with IUPHAR target and family tables.
+
+This module mirrors the data transformation logic from the original
+Power Query implementation used for ChEMBL data acquisition.  It
+provides a :class:`IUPHARData` container with helper methods to look up
+targets and classifications by various identifiers as well as to map a
+CSV of UniProt accessions to the corresponding IUPHAR hierarchy.
+
+Functions and methods that are part of the public API include clear
+docstrings and type hints.  Non-obvious steps are annotated with inline
+comments to aid maintenance.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +21,6 @@ import logging
 
 import pandas as pd
 import requests
-
 
 
 logger = logging.getLogger(__name__)
@@ -198,20 +208,28 @@ class IUPHARData:
         return list(rows.unique())
 
     def target_id_by_uniprot(self, uniprot_id: str) -> str:
+        """Return the first target ID mapped to ``uniprot_id``."""
+
         ids = self._select_target_ids(self.target_df["swissprot"].eq(uniprot_id))
         return ids[0] if ids else ""
 
     def target_id_by_hgnc_name(self, hgnc_name: str) -> str:
+        """Return target IDs whose HGNC name equals ``hgnc_name``."""
+
         if not hgnc_name:
             return ""
         ids = self._select_target_ids(self.target_df["hgnc_name"].eq(hgnc_name))
         return "|".join(ids) if ids else ""
 
     def target_id_by_hgnc_id(self, hgnc_id: str) -> str:
+        """Return target IDs whose HGNC identifier matches ``hgnc_id``."""
+
         ids = self._select_target_ids(self.target_df["hgnc_id"].eq(hgnc_id))
         return "|".join(ids) if ids else ""
 
     def target_id_by_gene(self, gene_name: str) -> str:
+        """Return target IDs whose gene symbol matches ``gene_name``."""
+
         ids = self._select_target_ids(self.target_df["gene_name"].eq(gene_name))
         return "|".join(ids) if ids else ""
 
@@ -241,6 +259,8 @@ class IUPHARData:
         return "|".join(ids) if ids else ""
 
     def target_ids_by_synonyms(self, synonyms: Iterable[str]) -> str:
+        """Return target IDs derived from a collection of ``synonyms``."""
+
         valid = [s for s in synonyms if s and len(s) > 3]
         ids: List[str] = []
         for syn in valid:
@@ -266,6 +286,15 @@ class IUPHARData:
         return "|".join(unique) if unique else ""
 
     def target_id_from_row(self, row: pd.Series) -> str:
+        """Resolve a target identifier using multiple columns from ``row``.
+
+        The function attempts to determine a target ID by consulting, in
+        order, the UniProt accession, HGNC name, HGNC ID, an explicit name
+        field and any provided synonyms.  Each stage only fills in missing
+        identifiers, mirroring the behaviour of the legacy Power Query
+        implementation.
+        """
+
         uniprot = self.target_id_by_uniprot(row.get("uniprot_id", ""))
         hgnc_name = self.target_id_by_hgnc_name(row.get("hgnc_name", ""))
         hgnc_id = self.target_id_by_hgnc_id(row.get("hgnc_id", ""))
@@ -392,12 +421,16 @@ class IUPHARData:
     # ------------------------------------------------------------------
 
     def from_target_record(self, target_id: str) -> Optional[pd.Series]:
+        """Return the raw target record for ``target_id`` if present."""
+
         rows = self.target_df[self.target_df["target_id"] == target_id]
         if rows.empty:
             return None
         return rows.iloc[0]
 
     def from_target_family_record(self, target_id: str) -> Optional[pd.Series]:
+        """Return the family record associated with ``target_id``."""
+
         mask = self.family_df["target_id"].fillna("").str.split("|").apply(
             lambda ids: target_id in ids
         )
@@ -407,10 +440,14 @@ class IUPHARData:
         return rows.iloc[0]
 
     def from_target_name(self, target_id: str) -> str:
+        """Return the IUPHAR target name for ``target_id``."""
+
         record = self.from_target_record(target_id)
         return str(record.get("target_name")) if record is not None else ""
 
     def from_target_type(self, target_id: str) -> str:
+        """Return the target ``type`` field for ``target_id``."""
+
         record = self.from_target_record(target_id)
         if record is None:
             return ""
@@ -418,6 +455,8 @@ class IUPHARData:
         return str(value) if pd.notna(value) else ""
 
     def from_target_synonyms(self, target_id: str) -> str:
+        """Return pipe-separated synonyms for ``target_id``."""
+
         record = self.from_target_record(target_id)
         if record is None:
             return ""
@@ -425,6 +464,8 @@ class IUPHARData:
         return str(value) if pd.notna(value) else ""
 
     def from_target_family_id(self, target_id: str) -> str:
+        """Return the family identifier linked to ``target_id``."""
+
         record = self.from_target_record(target_id)
         if record is None:
             return ""
@@ -432,6 +473,8 @@ class IUPHARData:
         return str(value) if pd.notna(value) else ""
 
     def from_target_parent_family(self, target_id: str) -> str:
+        """Return the parent family ID for ``target_id``."""
+
         record = self.from_target_family_record(target_id)
         if record is None:
             return ""
@@ -443,6 +486,19 @@ class IUPHARData:
     # ------------------------------------------------------------------
 
     def from_family_type(self, family_id: str) -> str:
+        """Return the ``type`` field for ``family_id``.
+
+        Parameters
+        ----------
+        family_id:
+            Identifier of the family to inspect.
+
+        Returns
+        -------
+        str
+            Family type or an empty string when ``family_id`` is unknown.
+        """
+
         record = self.from_family_record(family_id)
         if record is None:
             return ""
@@ -450,12 +506,16 @@ class IUPHARData:
         return str(value) if pd.notna(value) else ""
 
     def from_family_record(self, family_id: str) -> Optional[pd.Series]:
+        """Return the raw family record for ``family_id`` if present."""
+
         rows = self.family_df[self.family_df["family_id"] == family_id]
         if rows.empty:
             return None
         return rows.iloc[0]
 
     def from_family_parent(self, family_id: str) -> str:
+        """Return the parent family identifier for ``family_id``."""
+
         record = self.from_family_record(family_id)
         if record is None:
             return ""
@@ -767,6 +827,8 @@ class IUPHARClassifier:
     def by_target_id(
         self, iuphar_target_id: str, optional_name: Optional[str] = None
     ) -> ClassificationRecord:
+        """Classify a target given its IUPHAR target identifier."""
+
         if not self._is_valid_parameter(iuphar_target_id) or "|" in iuphar_target_id:
             return ClassificationRecord()
         family_id = self.data.from_target_family_id(iuphar_target_id)
@@ -788,6 +850,8 @@ class IUPHARClassifier:
     def by_family_id(
         self, iuphar_family_id: str, optional_name: Optional[str] = None
     ) -> ClassificationRecord:
+        """Classify a target given an IUPHAR family identifier."""
+
         if not self._is_valid_parameter(iuphar_family_id) or "|" in iuphar_family_id:
             return ClassificationRecord()
         return self.set_record("N/A", iuphar_family_id, optional_name or "")
@@ -795,6 +859,8 @@ class IUPHARClassifier:
     def by_ec_number(
         self, iuphar_ec_number: str, optional_name: Optional[str] = None
     ) -> ClassificationRecord:
+        """Classify based on an EC number string."""
+
         numbers = (
             iuphar_ec_number.split("|")
             if "." in iuphar_ec_number or "|" in iuphar_ec_number
@@ -821,6 +887,8 @@ class IUPHARClassifier:
         )
 
     def by_name(self, iuphar_name: str) -> ClassificationRecord:
+        """Classify based on a free-text IUPHAR name."""
+
         if not self._is_valid_parameter(iuphar_name):
             return ClassificationRecord()
         target_id = self.data.target_id_by_name(iuphar_name)
@@ -857,6 +925,8 @@ class IUPHARClassifier:
         iuphar_ec_number: str,
         iuphar_name: str,
     ) -> ClassificationRecord:
+        """Resolve the best classification given multiple identifiers."""
+
         target_rec = (
             self.by_target_id(iuphar_target_id, iuphar_name)
             if self._is_valid_parameter(iuphar_target_id)
@@ -886,6 +956,8 @@ class IUPHARClassifier:
     def merge_activity(
         self, input_df: pd.DataFrame, activity_df: pd.DataFrame
     ) -> pd.DataFrame:
+        """Merge catalytic activity information into ``input_df``."""
+
         merged = input_df.merge(
             activity_df, on="task_uniprot_id", how="left", suffixes=("", "_act")
         )
@@ -910,6 +982,8 @@ class IUPHARClassifier:
         activity_df: pd.DataFrame,
         db_name: str,
     ) -> pd.DataFrame:
+        """Initialise classification columns for *input_df*."""
+
         df = self.merge_activity(input_df, activity_df)
 
         def classify(row: pd.Series) -> pd.Series:
@@ -937,6 +1011,8 @@ class IUPHARClassifier:
     def by_reference(
         self, target_df: pd.DataFrame, db_df: pd.DataFrame, db_column: str
     ) -> pd.DataFrame:
+        """Merge existing classification data from another database."""
+
         if "task_uniprot_id" not in target_df.columns:
             raise ValueError("target_df must contain 'task_uniprot_id'")
         if db_column not in db_df.columns:
@@ -962,6 +1038,8 @@ class IUPHARClassifier:
     def get_database(
         self, family_table: pd.DataFrame, name_table: pd.DataFrame, db_column: str
     ) -> pd.DataFrame:
+        """Derive a database-specific classification lookup table."""
+
         valid = family_table[family_table[db_column].notna() & (family_table[db_column] != "N/A")]
         merged = valid.merge(name_table, on="task_uniprot_id", how="left")
         records = []
