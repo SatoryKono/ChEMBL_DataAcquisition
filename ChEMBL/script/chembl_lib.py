@@ -35,7 +35,7 @@ JSON format.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Iterable
 
 import logging
 import requests
@@ -61,10 +61,10 @@ TARGET_FIELDS = [
     "HGNC_id",
 ]
 
-EMPTY_TARGET: Dict[str, str] = {field: "" for field in TARGET_FIELDS}
+EMPTY_TARGET: dict[str, str] = {field: "" for field in TARGET_FIELDS}
 
 
-def _parse_gene_synonyms(synonyms: List[Dict[str, str]]) -> str:
+def _parse_gene_synonyms(synonyms: list[dict[str, str]]) -> str:
     """Return a sorted, pipe separated list of gene synonyms."""
     names = {
         s["component_synonym"]
@@ -74,19 +74,19 @@ def _parse_gene_synonyms(synonyms: List[Dict[str, str]]) -> str:
     return "|".join(sorted(names))
 
 
-def _parse_ec_codes(synonyms: List[Dict[str, str]]) -> str:
+def _parse_ec_codes(synonyms: list[dict[str, str]]) -> str:
     """Return a sorted, pipe separated list of EC numbers."""
     codes = {s["component_synonym"] for s in synonyms if s.get("syn_type") == "EC_NUMBER"}
     return "|".join(sorted(codes))
 
 
-def _parse_alt_names(synonyms: List[Dict[str, str]]) -> str:
+def _parse_alt_names(synonyms: list[dict[str, str]]) -> str:
     """Return a sorted, pipe separated list of UniProt alternative names."""
     names = {s["component_synonym"] for s in synonyms if s.get("syn_type") == "UNIPROT"}
     return "|".join(sorted(names))
 
 
-def _parse_hgnc(xrefs: List[Dict[str, str]]) -> Tuple[str, str]:
+def _parse_hgnc(xrefs: list[dict[str, str]]) -> tuple[str, str]:
     """Extract HGNC name and identifier from a list of cross references."""
     for x in xrefs:
         if x.get("xref_src_db") == "HGNC":
@@ -97,7 +97,7 @@ def _parse_hgnc(xrefs: List[Dict[str, str]]) -> Tuple[str, str]:
     return "", ""
 
 
-def _get_items(container: Any, key: str) -> List[Any]:
+def _get_items(container: Any, key: str) -> list[Any]:
     """Return a list of items from a container that may be a dict or list."""
     if isinstance(container, dict):
         items = container.get(key, [])
@@ -111,7 +111,7 @@ def _get_items(container: Any, key: str) -> List[Any]:
     return []
 
 
-def _chunked(items: List[str], size: int) -> Iterable[List[str]]:
+def _chunked(items: list[str], size: int) -> Iterable[list[str]]:
     """Yield successive ``size``-length chunks from ``items``.
 
     Parameters
@@ -130,7 +130,7 @@ def _chunked(items: List[str], size: int) -> Iterable[List[str]]:
         yield items[i : i + size]
 
 
-def _parse_target_record(data: Dict[str, Any]) -> Dict[str, Any]:
+def _parse_target_record(data: dict[str, Any]) -> dict[str, Any]:
     """Transform a raw target record into a flat dictionary."""
     components = _get_items(data.get("target_components"), "target_component")
     if not components:
@@ -162,7 +162,7 @@ def _parse_target_record(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def get_target(chembl_target_id: str) -> Dict[str, Any]:
+def get_target(chembl_target_id: str) -> dict[str, Any]:
     """Fetch target data from ChEMBL for a single identifier.
 
     Parameters
@@ -397,7 +397,19 @@ DOCUMENT_COLUMNS = [
 
 
 def get_document(chembl_document_id: str) -> pd.DataFrame:
-    """Retrieve document information as a DataFrame."""
+    """Retrieve document information for a single identifier.
+
+    Parameters
+    ----------
+    chembl_document_id:
+        ChEMBL document identifier.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Single-row DataFrame with document data.  An empty DataFrame is
+        returned if the request fails or the ID is blank.
+    """
     if chembl_document_id in {"", "#N/A"}:
         return pd.DataFrame(columns=DOCUMENT_COLUMNS)
 

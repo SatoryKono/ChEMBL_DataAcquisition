@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
 
 import pandas as pd
 
@@ -11,7 +10,7 @@ def read_ids(
     column: str = "chembl_id",
     sep: str = ",",
     encoding: str = "utf8",
-) -> List[str]:
+) -> list[str]:
     """Read identifier values from a CSV file.
 
     Parameters
@@ -49,4 +48,6 @@ def read_ids(
         raise ValueError(f"column '{column}' not found in {path}")
 
     ids = df[column].dropna().astype(str)
+
     return [i for i in ids if i and i != "#N/A"]
+
