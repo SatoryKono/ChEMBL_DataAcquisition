@@ -168,11 +168,13 @@ class IUPHARData:
     ) -> pd.DataFrame:
         """Map UniProt IDs to classification data and write a CSV output.
 
-        The input CSV must contain a ``uniprot_id`` column. Each accession is
-        translated to the corresponding IUPHAR target identifier and a full
-        classification record. The resulting table includes the target ID,
-        class, subclass, and family chain in addition to the full ID and name
-        paths.
+        The input CSV must contain a ``uniprot_id`` column. If a UniProt lookup
+        fails, optional columns ``HGNC_name``, ``HGNC_id``, ``gene_name`` and
+        ``synonyms`` (pipe-delimited) are consulted in that order to resolve a
+        target identifier. Each accession is translated to the corresponding
+        IUPHAR target identifier and a full classification record. The
+        resulting table includes the target ID, class, subclass, and family
+        chain in addition to the full ID and name paths.
 
         Parameters
         ----------
@@ -195,7 +197,34 @@ class IUPHARData:
 
         classifier = IUPHARClassifier(self)
 
+        # Resolve target identifiers with a series of fallbacks. The search
+        # order mimics the Power Query logic: UniProt accession, HGNC name,
+        # HGNC ID, gene symbol and finally any supplied synonyms.
         df["target_id"] = df["uniprot_id"].apply(self.target_id_by_uniprot)
+
+        if "HGNC_name" in df.columns:
+            mask = df["target_id"].eq("")
+            df.loc[mask, "target_id"] = df.loc[mask, "HGNC_name"].apply(
+                self.target_id_by_hgnc_name
+            )
+
+        if "HGNC_id" in df.columns:
+            mask = df["target_id"].eq("")
+            df.loc[mask, "target_id"] = df.loc[mask, "HGNC_id"].apply(
+                self.target_id_by_hgnc_id
+            )
+
+        if "gene_name" in df.columns:
+            mask = df["target_id"].eq("")
+            df.loc[mask, "target_id"] = df.loc[mask, "gene_name"].apply(
+                self.target_id_by_gene
+            )
+
+        if "synonyms" in df.columns:
+            mask = df["target_id"].eq("")
+            df.loc[mask, "target_id"] = df.loc[mask, "synonyms"].apply(
+                lambda s: self.target_ids_by_synonyms(str(s).split("|")) if s else ""
+            )
 
         def _classify(tid: str) -> pd.Series:
             if not tid:

@@ -43,16 +43,47 @@ def test_uniprot_file_processing(tmp_path: Path) -> None:
     data.map_uniprot_file(input_file, output_file)
     assert output_file.exists()
     out = pd.read_csv(output_file, dtype=str).fillna("")
-    assert list(out["uniprot_id"]) == ["Q11111", "Q33333", "Q99999"]
-    assert list(out["target_id"]) == ["T1", "T3", ""]
-    assert list(out["full_id_path"]) == ["T1#F1", "T3#F2>F1", ""]
+    assert list(out["uniprot_id"]) == [
+        "Q11111",
+        "Q33333",
+        "Q99999",
+        "Q88888",
+        "Q77777",
+        "Q66666",
+    ]
+    assert list(out["target_id"]) == [
+        "T1",
+        "T3",
+        "T2",
+        "T1",
+        "T3",
+        "T3",
+    ]
+    assert list(out["full_id_path"]) == [
+        "T1#F1",
+        "T3#F2>F1",
+        "T2#F1",
+        "T1#F1",
+        "T3#F2>F1",
+        "T3#F2>F1",
+    ]
     assert list(out["full_name_path"]) == [
         "Target One#Family One",
         "Target Three#Family Two>Family One",
-        "",
+        "Target Two#Family One",
+        "Target One#Family One",
+        "Target Three#Family Two>Family One",
+        "Target Three#Family Two>Family One",
     ]
     assert "IUPHAR_class" in out.columns
-    assert list(out["IUPHAR_chain"]) == ["F1", "F2>F1", ""]
+    assert list(out["IUPHAR_chain"]) == [
+        "F1",
+        "F2>F1",
+        "F1",
+        "F1",
+        "F2>F1",
+        "F2>F1",
+    ]
 
 
 def test_classify_by_target() -> None:

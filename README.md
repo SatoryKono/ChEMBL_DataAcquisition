@@ -32,7 +32,9 @@ python main.py \
 
 The resulting file includes the resolved ``target_id`` together with the
 IUPHAR classification (class, subclass and family chain) for each UniProt
-accession.
+accession. If a UniProt lookup fails, the script optionally consults
+``HGNC_name``, ``HGNC_id``, ``gene_name`` and ``synonyms`` columns (when
+present) to resolve the identifier.
 
 ## Development
 

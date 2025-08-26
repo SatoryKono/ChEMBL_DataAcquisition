@@ -1,4 +1,7 @@
-uniprot_id
-Q11111
-Q33333
-Q99999
+uniprot_id,HGNC_name,HGNC_id,gene_name,synonyms
+Q11111,,,,
+Q33333,,,,
+Q99999,GENEB,,,
+Q88888,,1000,,
+Q77777,,,GENEC,
+Q66666,,,,epsilon|theta
