@@ -323,32 +323,51 @@ def get_assay(chembl_assay_id: str) -> pd.DataFrame:
     return df
 
 
-def get_assays(ids: Iterable[str]) -> pd.DataFrame:
-    """Fetch assay records for ``ids`` in a single request."""
+def get_assays(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
+    """Fetch assay records for ``ids``.
+
+    Parameters
+    ----------
+    ids:
+        Assay identifiers to retrieve.
+    chunk_size:
+        Maximum number of IDs per HTTP request. Large inputs are split into chunks
+        to avoid URL length limits.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Combined assay records for all identifiers. Failed chunks are skipped.
+    """
     valid = [i for i in ids if i not in {"", "#N/A"}]
     if not valid:
         return pd.DataFrame(columns=ASSAY_COLUMNS)
 
-    url = (
-        "https://www.ebi.ac.uk/chembl/api/data/assay.json?format=json&variant_sequence__isnull=false&assay_chembl_id__in="
-        + ",".join(valid)
-    )
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as exc:  # pragma: no cover - network
-        logger.warning("Bulk assay request failed: %s", exc)
-        return pd.DataFrame(columns=ASSAY_COLUMNS)
+    frames: List[pd.DataFrame] = []
+    for chunk in _chunked(valid, chunk_size):
+        url = (
+            "https://www.ebi.ac.uk/chembl/api/data/assay.json?format=json&variant_sequence__isnull=false&assay_chembl_id__in="
+            + ",".join(chunk)
+        )
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:  # pragma: no cover - network
+            logger.warning("Bulk assay request failed for %s: %s", chunk, exc)
+            continue
 
-    try:
-        data = response.json()
-    except ValueError as exc:  # pragma: no cover - malformed JSON
-        logger.warning("Failed to decode JSON for assays: %s", exc)
-        return pd.DataFrame(columns=ASSAY_COLUMNS)
+        try:
+            data = response.json()
+        except ValueError as exc:  # pragma: no cover - malformed JSON
+            logger.warning("Failed to decode JSON for assays %s: %s", chunk, exc)
+            continue
 
-    items = data.get("assays") or data.get("assay") or []
-    df = pd.json_normalize(items)
-    return df.reindex(columns=ASSAY_COLUMNS)
+        items = data.get("assays") or data.get("assay") or []
+        frames.append(pd.json_normalize(items).reindex(columns=ASSAY_COLUMNS))
+
+    if not frames:
+        return pd.DataFrame(columns=ASSAY_COLUMNS)
+    return pd.concat(frames, ignore_index=True)
 
 
 # ----------------------------
@@ -400,52 +419,80 @@ def get_document(chembl_document_id: str) -> pd.DataFrame:
     return df.reindex(columns=DOCUMENT_COLUMNS)
 
 
-def get_documents(ids: Iterable[str]) -> pd.DataFrame:
-    """Fetch document records for ``ids`` in a single request."""
+def get_documents(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
+    """Fetch document records for ``ids``.
+
+    Parameters
+    ----------
+    ids:
+        Document identifiers to retrieve.
+    chunk_size:
+        Maximum number of IDs per HTTP request. Large inputs are split into chunks
+        to avoid URL length limits.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Combined document records for all identifiers. Failed chunks are skipped.
+    """
     valid = [i for i in ids if i not in {"", "#N/A"}]
     if not valid:
         return pd.DataFrame(columns=DOCUMENT_COLUMNS)
 
-    url = (
-        "https://www.ebi.ac.uk/chembl/api/data/document.json?format=json&document_chembl_id__in="
-        + ",".join(valid)
-    )
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as exc:  # pragma: no cover - network
-        logger.warning("Bulk document request failed: %s", exc)
-        return pd.DataFrame(columns=DOCUMENT_COLUMNS)
+    frames: List[pd.DataFrame] = []
+    for chunk in _chunked(valid, chunk_size):
+        url = (
+            "https://www.ebi.ac.uk/chembl/api/data/document.json?format=json&document_chembl_id__in="
+            + ",".join(chunk)
+        )
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:  # pragma: no cover - network
+            logger.warning("Bulk document request failed for %s: %s", chunk, exc)
+            continue
 
-    try:
-        data = response.json()
-    except ValueError as exc:  # pragma: no cover - malformed JSON
-        logger.warning("Failed to decode JSON for documents: %s", exc)
-        return pd.DataFrame(columns=DOCUMENT_COLUMNS)
+        try:
+            data = response.json()
+        except ValueError as exc:  # pragma: no cover - malformed JSON
+            logger.warning("Failed to decode JSON for documents %s: %s", chunk, exc)
+            continue
 
-    items = data.get("documents") or data.get("document") or []
-    df = pd.json_normalize(items)
-    return df.reindex(columns=DOCUMENT_COLUMNS)
+        items = data.get("documents") or data.get("document") or []
+        frames.append(pd.json_normalize(items).reindex(columns=DOCUMENT_COLUMNS))
+
+    if not frames:
+        return pd.DataFrame(columns=DOCUMENT_COLUMNS)
+    return pd.concat(frames, ignore_index=True)
 
 
 def extend_target(df: pd.DataFrame, chembl_column: str = "task_chembl_id") -> pd.DataFrame:
-    """Augment a DataFrame with target information.
+    """Augment ``df`` with target information in bulk.
 
     Parameters
     ----------
     df:
         Input table containing a column with ChEMBL target IDs.
     chembl_column:
-        Name of the column holding the target IDs. Default is
-        ``"task_chembl_id"``.
+        Name of the column holding the target IDs. Default is ``"task_chembl_id"``.
 
     Returns
     -------
     pandas.DataFrame
         Original data combined with the expanded target information.
     """
-    target_data = df[chembl_column].apply(get_target).apply(pd.Series)
-    target_data = target_data.rename(
+    ids = df[chembl_column].dropna().astype(str).unique().tolist()
+    targets = get_targets(ids)
+    if targets.empty:
+        return df.copy()
+
+    merged = df.merge(
+        targets,
+        how="left",
+        left_on=chembl_column,
+        right_on="target_chembl_id",
+    )
+    return merged.rename(
         columns={
             "pref_name": "chembl_pref_name",
             "target_chembl_id": "chembl_target_chembl_id",
@@ -459,40 +506,3 @@ def extend_target(df: pd.DataFrame, chembl_column: str = "task_chembl_id") -> pd
             "HGNC_id": "chembl_HGNC_id",
         }
     )
-    return pd.concat([df.reset_index(drop=True), target_data], axis=1)
-def read_ids(
-    path: str | Path,
-    column: str = "chembl_id",
-    sep: str = ",",
-    encoding: str = "utf8",
-) -> List[str]:
-    """Read identifier values from a CSV file.
-
-    Parameters
-    ----------
-    path : str or Path
-        Path to the CSV file.
-    column : str, optional
-        Name of the column containing identifiers. Defaults to ``"chembl_id"``.
-    sep : str, optional
-        Field delimiter, by default a comma.
-    encoding : str, optional
-        File encoding, by default ``"utf8"``.
-
-    Returns
-    -------
-    list of str
-        Identifier values in the order they appear. Empty strings and ``"#N/A"``
-        markers are discarded.
-
-    Raises
-    ------
-    ValueError
-        If ``column`` is not present in the input file.
-    """
-    df = pd.read_csv(path, sep=sep, encoding=encoding, dtype=str)
-    if column not in df.columns:
-        raise ValueError(f"column '{column}' not found in {path}")
-
-    ids = df[column].dropna().astype(str)
-    return [i for i in ids if i and i != "#N/A"]
