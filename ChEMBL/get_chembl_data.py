@@ -85,6 +85,12 @@ def configure_logging(level: str) -> None:
     ----------
     level:
         Logging verbosity such as ``"INFO"`` or ``"DEBUG"``.
+
+    Returns
+    -------
+    None
+        This function configures the root logger in-place and does not
+        return a value.
     """
     logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO))
 
