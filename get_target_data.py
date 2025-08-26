@@ -189,7 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     all_cmd.add_argument(
         "input_csv",
         type=Path,
-        help="CSV with 'chembl_id' and 'uniprot_id' columns",
+        help="CSV with a 'chembl_id' column",
     )
     all_cmd.add_argument(
         "output_csv",
@@ -353,7 +353,7 @@ def run_all(args: argparse.Namespace) -> int:
             args.output_csv.stem + "_iuphar.csv"
         )
 
-        # Run individual pipelines sequentially
+        # Run ChEMBL retrieval and capture results
         chembl_args = argparse.Namespace(
             input_csv=args.input_csv,
             output_csv=chembl_out,
@@ -363,17 +363,36 @@ def run_all(args: argparse.Namespace) -> int:
         )
         if run_chembl(chembl_args) != 0:
             return 1
+        chembl_df = pd.read_csv(
+            chembl_out, sep=args.sep, encoding=args.encoding, dtype=str
+        ).rename(columns={"target_chembl_id": "chembl_id"})
 
+        # Extract UniProt IDs and write temporary CSV for downstream steps
+        uids = [u for u in chembl_df.get("uniprot_id", []) if isinstance(u, str) and u]
+        from tempfile import NamedTemporaryFile
+
+        with NamedTemporaryFile("w", delete=False, encoding=args.encoding, newline="") as tmp:
+            writer = csv.DictWriter(tmp, fieldnames=["uniprot_id"], delimiter=args.sep)
+            writer.writeheader()
+            for uid in uids:
+                writer.writerow({"uniprot_id": uid})
+            tmp_path = Path(tmp.name)
+
+        # Run UniProt pipeline
         uniprot_args = argparse.Namespace(
-            input_csv=args.input_csv,
+            input_csv=tmp_path,
             output_csv=uniprot_out,
             data_dir=args.data_dir,
             sep=args.sep,
             encoding=args.encoding,
         )
-        if run_uniprot(uniprot_args) != 0:
-            return 1
+        try:
+            if run_uniprot(uniprot_args) != 0:
+                return 1
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
+        # Run IUPHAR mapping using UniProt output
         iuphar_args = argparse.Namespace(
             input_csv=uniprot_out,
             output_csv=iuphar_out,
@@ -386,40 +405,19 @@ def run_all(args: argparse.Namespace) -> int:
             return 1
 
         # Merge results using pandas
-        base_df = pd.read_csv(
-            args.input_csv, sep=args.sep, encoding=args.encoding, dtype=str
-        ).fillna("")
-        if {"chembl_id", "uniprot_id"} - set(base_df.columns):
-            missing = {"chembl_id", "uniprot_id"} - set(base_df.columns)
-            raise ValueError(
-                "input file must contain columns: " + ", ".join(sorted(missing))
-            )
-
-        chembl_df = pd.read_csv(
-            chembl_out, sep=args.sep, encoding=args.encoding, dtype=str
-        ).rename(columns={"target_chembl_id": "chembl_id"})
         uniprot_df = pd.read_csv(
             uniprot_out, sep=args.sep, encoding=args.encoding, dtype=str
         )
         iuphar_df = pd.read_csv(
             iuphar_out, sep=args.sep, encoding=args.encoding, dtype=str
         )
-
         classification_cols = [
-            c
-            for c in iuphar_df.columns
-            if c
-            not in {
-                "uniprot_id",
-                "hgnc_name",
-            }
+            c for c in iuphar_df.columns if c not in {"uniprot_id", "hgnc_name"}
         ]
         iuphar_df = iuphar_df[["uniprot_id", *classification_cols]]
 
-        merged = base_df.merge(chembl_df, on="chembl_id", how="left")
-        merged = merged.merge(uniprot_df, on="uniprot_id", how="left")
+        merged = chembl_df.merge(uniprot_df, on="uniprot_id", how="left")
         merged = merged.merge(iuphar_df, on="uniprot_id", how="left")
-
         merged.to_csv(
             args.output_csv, index=False, sep=args.sep, encoding=args.encoding
         )
