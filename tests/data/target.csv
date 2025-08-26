@@ -1,0 +1,4 @@
+target_id,swissprot,hgnc_name,hgnc_id,gene_name,synonyms,family_id,target_name
+T1,Q11111,GENEA,1000,GENEA,"alpha|beta",F1,Target One
+T2,Q22222,GENEB,1001,GENEB,"gamma|delta",F1,Target Two
+T3,Q33333,GENEC,1002,GENEC,"epsilon|zeta",F2,Target Three

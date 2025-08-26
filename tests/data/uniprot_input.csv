@@ -1,0 +1,8 @@
+uniprot_id,hgnc_name,hgnc_id,gene_name,synonyms,ec_number
+Q11111,,,,,
+Q33333,,,,,
+Q99999,GENEB,,,,
+Q88888,,1000,,,
+Q77777,,,GENEC,,
+Q66666,,,,epsilon|theta,
+UNKNOWN,,,,,1.2.3.4
