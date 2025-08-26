@@ -9,7 +9,7 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from mylib.transforms import IUPHARData, IUPHARClassifier
+from IUPHAR.script.transforms import IUPHARData, IUPHARClassifier
 
 
 def load_data() -> IUPHARData:

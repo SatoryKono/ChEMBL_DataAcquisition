@@ -1,6 +1,8 @@
+black>=23.0
+mypy>=1.8
 pandas>=2.0
+pytest>=7.4
 requests>=2.31
 responses>=0.23
-pytest>=7.4
 ruff>=0.1
-mypy>=1.8
+urllib3>=1.26

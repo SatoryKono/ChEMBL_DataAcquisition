@@ -12,11 +12,7 @@ Usage:
 The input CSV must contain a column named ``UniProt_id``.
 """
 
-import csv
-import json
-import os
 import sys
-from typing import Iterable
 
 from script import uniprot_utils as uu
 

@@ -5,7 +5,7 @@ from pathlib import Path
 import responses
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from mylib import pubchem
+from PubChem.script import pubchem
 
 DATA_DIR = Path(__file__).parent / "data"
 
