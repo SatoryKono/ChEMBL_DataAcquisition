@@ -6,7 +6,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from mylib.transforms import IUPHARClassifier, IUPHARData
+from script.transforms import IUPHARClassifier, IUPHARData
 
 
 def build_parser() -> argparse.ArgumentParser:
