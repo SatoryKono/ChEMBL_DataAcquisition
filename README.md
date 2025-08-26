@@ -74,7 +74,8 @@ python get_PubChem.py --name "aspirin"
 ### ChEMBL
 
 ```bash
-python get_chembl_data.py --target CHEMBL25
+python get_chembl_data.py --target --input tests/data/target.csv  --output ChEMBL_target.csv 
+
 ```
 
 ## Development
