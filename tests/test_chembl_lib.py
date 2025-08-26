@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from script import chembl_lib
 
@@ -33,3 +34,9 @@ def test_extend_target_uses_bulk(monkeypatch):
     assert calls == [["CHEMBL1"]]
     assert "chembl_pref_name" in result.columns
     assert result.loc[0, "chembl_pref_name"] == "name"
+
+
+def test_extend_target_missing_column():
+    df = pd.DataFrame({"other": [1]})
+    with pytest.raises(ValueError):
+        chembl_lib.extend_target(df)
