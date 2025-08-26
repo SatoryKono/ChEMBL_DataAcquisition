@@ -50,6 +50,7 @@ def test_uniprot_file_processing(tmp_path: Path) -> None:
         "Q88888",
         "Q77777",
         "Q66666",
+        "UNKNOWN",
     ]
     assert list(out["target_id"]) == [
         "T1",
@@ -58,6 +59,7 @@ def test_uniprot_file_processing(tmp_path: Path) -> None:
         "T1",
         "T3",
         "T3",
+        "",
     ]
     assert list(out["full_id_path"]) == [
         "T1#F1",
@@ -66,6 +68,7 @@ def test_uniprot_file_processing(tmp_path: Path) -> None:
         "T1#F1",
         "T3#F2>F1",
         "T3#F2>F1",
+        "",
     ]
     assert list(out["full_name_path"]) == [
         "Target One#Family One",
@@ -74,6 +77,7 @@ def test_uniprot_file_processing(tmp_path: Path) -> None:
         "Target One#Family One",
         "Target Three#Family Two>Family One",
         "Target Three#Family Two>Family One",
+        "",
     ]
     assert "IUPHAR_class" in out.columns
     assert list(out["IUPHAR_chain"]) == [
@@ -83,7 +87,12 @@ def test_uniprot_file_processing(tmp_path: Path) -> None:
         "F1",
         "F2>F1",
         "F2>F1",
+        "0690-1>0690",
     ]
+    # ec_number fallback should classify unresolved targets
+    ec_row = out[out["uniprot_id"] == "UNKNOWN"].iloc[0]
+    assert ec_row["IUPHAR_class"] == "Enzyme"
+    assert ec_row["IUPHAR_subclass"] == "Oxidoreductase"
 
 
 def test_classify_by_target() -> None:

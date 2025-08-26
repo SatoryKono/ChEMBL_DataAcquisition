@@ -11,8 +11,8 @@ import pandas as pd
 EXPECTED_TARGET_COLUMNS: tuple[str, ...] = (
     "target_id",
     "swissprot",
-    "HGNC_NAME",
-    "HGNC_ID",
+    "hgnc_name",
+    "hgnc_id",
     "gene_name",
     "synonyms",
     "family_id",
@@ -69,6 +69,15 @@ def load_targets(path: str | Path, *, encoding: str = "utf-8") -> pd.DataFrame:
         Loaded target data with string identifiers.
     """
     df = pd.read_csv(path, encoding=encoding, dtype=str).fillna("")
+    # Normalise legacy column names to the expected lowercase form
+    df = df.rename(
+        columns={
+            "HGNC_NAME": "hgnc_name",
+            "HGNC_name": "hgnc_name",
+            "HGNC_ID": "hgnc_id",
+            "HGNC_id": "hgnc_id",
+        }
+    )
     _validate_columns(df, EXPECTED_TARGET_COLUMNS)
     return df
 

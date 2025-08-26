@@ -102,11 +102,11 @@ class IUPHARData:
     def target_id_by_hgnc_name(self, hgnc_name: str) -> str:
         if not hgnc_name:
             return ""
-        ids = self._select_target_ids(self.target_df["HGNC_NAME"].eq(hgnc_name))
+        ids = self._select_target_ids(self.target_df["hgnc_name"].eq(hgnc_name))
         return "|".join(ids) if ids else ""
 
     def target_id_by_hgnc_id(self, hgnc_id: str) -> str:
-        ids = self._select_target_ids(self.target_df["HGNC_ID"].eq(hgnc_id))
+        ids = self._select_target_ids(self.target_df["hgnc_id"].eq(hgnc_id))
         return "|".join(ids) if ids else ""
 
     def target_id_by_gene(self, gene_name: str) -> str:
@@ -165,8 +165,8 @@ class IUPHARData:
 
     def target_id_from_row(self, row: pd.Series) -> str:
         uniprot = self.target_id_by_uniprot(row.get("uniprot_id", ""))
-        hgnc_name = self.target_id_by_hgnc_name(row.get("HGNC_name", ""))
-        hgnc_id = self.target_id_by_hgnc_id(row.get("HGNC_id", ""))
+        hgnc_name = self.target_id_by_hgnc_name(row.get("hgnc_name", ""))
+        hgnc_id = self.target_id_by_hgnc_id(row.get("hgnc_id", ""))
         name = ""
         synonyms = ""
         all_ids = [x for x in [uniprot, hgnc_name, hgnc_id, name, synonyms] if x]
@@ -185,12 +185,14 @@ class IUPHARData:
         """Map UniProt IDs to classification data and write a CSV output.
 
         The input CSV must contain a ``uniprot_id`` column. If a UniProt lookup
-        fails, optional columns ``HGNC_name``, ``HGNC_id``, ``gene_name`` and
+        fails, optional columns ``hgnc_name``, ``hgnc_id``, ``gene_name`` and
         ``synonyms`` (pipe-delimited) are consulted in that order to resolve a
         target identifier. Each accession is translated to the corresponding
         IUPHAR target identifier and a full classification record. The
         resulting table includes the target ID, class, subclass, and family
-        chain in addition to the full ID and name paths.
+        chain in addition to the full ID and name paths. If no target can be
+        resolved, an optional ``ec_number`` column is used to derive
+        ``IUPHAR_type``, ``IUPHAR_class`` and ``IUPHAR_subclass``.
 
         Parameters
         ----------
@@ -218,15 +220,15 @@ class IUPHARData:
         # HGNC ID, gene symbol and finally any supplied synonyms.
         df["target_id"] = df["uniprot_id"].apply(self.target_id_by_uniprot)
 
-        if "HGNC_name" in df.columns:
+        if "hgnc_name" in df.columns:
             mask = df["target_id"].eq("")
-            df.loc[mask, "target_id"] = df.loc[mask, "HGNC_name"].apply(
+            df.loc[mask, "target_id"] = df.loc[mask, "hgnc_name"].apply(
                 self.target_id_by_hgnc_name
             )
 
-        if "HGNC_id" in df.columns:
+        if "hgnc_id" in df.columns:
             mask = df["target_id"].eq("")
-            df.loc[mask, "target_id"] = df.loc[mask, "HGNC_id"].apply(
+            df.loc[mask, "target_id"] = df.loc[mask, "hgnc_id"].apply(
                 self.target_id_by_hgnc_id
             )
 
@@ -242,18 +244,24 @@ class IUPHARData:
                 lambda s: self.target_ids_by_synonyms(str(s).split("|")) if s else ""
             )
 
-        def _classify(tid: str) -> pd.Series:
-            if not tid:
-                return pd.Series(
-                    {
-                        "IUPHAR_family_id": "",
-                        "IUPHAR_type": "",
-                        "IUPHAR_class": "",
-                        "IUPHAR_subclass": "",
-                        "IUPHAR_chain": "",
-                    }
-                )
-            record = classifier.by_target_id(tid)
+        def _classify(row: pd.Series) -> pd.Series:
+            tid = row.get("target_id", "")
+            record: ClassificationRecord
+            if tid:
+                record = classifier.by_target_id(tid)
+            else:
+                ec = row.get("ec_number", "")
+                if not ec:
+                    return pd.Series(
+                        {
+                            "IUPHAR_family_id": "",
+                            "IUPHAR_type": "",
+                            "IUPHAR_class": "",
+                            "IUPHAR_subclass": "",
+                            "IUPHAR_chain": "",
+                        }
+                    )
+                record = classifier.by_ec_number(ec)
             return pd.Series(
                 {
                     "IUPHAR_family_id": record.IUPHAR_family_id,
@@ -264,7 +272,7 @@ class IUPHARData:
                 }
             )
 
-        class_df = df["target_id"].apply(_classify)
+        class_df = df.apply(_classify, axis=1)
         df = pd.concat([df, class_df], axis=1)
 
         df["full_id_path"] = df["target_id"].apply(self.all_id)
@@ -421,7 +429,7 @@ class IUPHARData:
         result = joined.rename(
             columns={
                 "UniProtKB ID": "chembl_swissprot",
-                "HGNC ID": "chembl_HGNC_id",
+                "HGNC ID": "chembl_hgnc_id",
                 "IUPHAR Name": "chembl_name",
                 "Family name": "family_name",
                 "Family id": "family_id",

@@ -57,8 +57,8 @@ TARGET_FIELDS = [
     "gene",
     "chembl_alternative_name",
     "ec_code",
-    "HGNC_name",
-    "HGNC_id",
+    "hgnc_name",
+    "hgnc_id",
 ]
 
 EMPTY_TARGET: Dict[str, str] = {field: "" for field in TARGET_FIELDS}
@@ -157,8 +157,8 @@ def _parse_target_record(data: Dict[str, Any]) -> Dict[str, Any]:
         "gene": gene,
         "chembl_alternative_name": alt_name,
         "ec_code": ec_code,
-        "HGNC_name": hgnc_name,
-        "HGNC_id": hgnc_id,
+        "hgnc_name": hgnc_name,
+        "hgnc_id": hgnc_id,
     }
 
 
@@ -455,8 +455,8 @@ def extend_target(df: pd.DataFrame, chembl_column: str = "task_chembl_id") -> pd
             "gene": "chembl_gene",
             "chembl_alternative_name": "chembl_alternative_name",
             "ec_code": "chembl_ec_code",
-            "HGNC_name": "chembl_HGNC_name",
-            "HGNC_id": "chembl_HGNC_id",
+            "hgnc_name": "chembl_hgnc_name",
+            "hgnc_id": "chembl_hgnc_id",
         }
     )
     return pd.concat([df.reset_index(drop=True), target_data], axis=1)
