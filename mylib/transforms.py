@@ -114,10 +114,26 @@ class IUPHARData:
         return "|".join(ids) if ids else ""
 
     def target_id_by_name(self, target_name: str) -> str:
+        """Resolve target IDs by searching the synonym field.
+
+        Parameters
+        ----------
+        target_name:
+            Name or synonym to search for.
+
+        Returns
+        -------
+        str
+            Pipe-delimited target identifiers whose ``synonyms`` column
+            contains ``target_name``. The search is case-insensitive and treats
+            ``target_name`` as a literal substring rather than a regular
+            expression, avoiding errors with special characters.
+        """
+
         if not target_name:
             return ""
         mask = self.target_df["synonyms"].fillna("").str.contains(
-            target_name, case=False, na=False
+            target_name, case=False, na=False, regex=False
         )
         ids = self._select_target_ids(mask)
         return "|".join(ids) if ids else ""

@@ -118,3 +118,10 @@ def test_ec_number_mapping() -> None:
     rec = classifier.by_ec_number("1.2.3.4")
     assert rec.IUPHAR_type == "Enzyme.Oxidoreductase"
     assert rec.IUPHAR_tree == ["0690-1", "0690"]
+
+
+def test_target_id_by_name_special_chars() -> None:
+    """Special characters should be treated literally, not as regex."""
+    data = load_data()
+    # "[" would previously raise a regex error
+    assert data.target_id_by_name("alp[ha") == ""
