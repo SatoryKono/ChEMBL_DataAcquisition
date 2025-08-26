@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Iterable, List
 
-from mylib.pubchem import process_compound
+from script.pubchem import process_compound
 
 
 def parse_args() -> argparse.Namespace:
