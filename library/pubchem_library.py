@@ -73,10 +73,12 @@ def validate_cid(cid: str) -> Optional[str]:
     Returns
     -------
     str or None
-        ``cid`` if valid, otherwise ``None`` when CID is ``"0"`` or
-        ``"-1"``.
+        ``cid`` if valid, otherwise ``None`` when the identifier is empty or
+        represents an invalid placeholder (``"0"`` or ``"-1"``).
     """
-    return None if cid in {"0", "-1"} else cid
+    if cid in {"", "0", "-1"}:
+        return None
+    return cid
 
 
 def _extract_cids(bindings: List[Dict[str, Any]]) -> List[str]:
