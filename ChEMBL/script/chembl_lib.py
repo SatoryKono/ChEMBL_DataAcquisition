@@ -35,7 +35,7 @@ JSON format.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Iterable
 
 import logging
 import requests
@@ -61,10 +61,10 @@ TARGET_FIELDS = [
     "HGNC_id",
 ]
 
-EMPTY_TARGET: Dict[str, str] = {field: "" for field in TARGET_FIELDS}
+EMPTY_TARGET: dict[str, str] = {field: "" for field in TARGET_FIELDS}
 
 
-def _parse_gene_synonyms(synonyms: List[Dict[str, str]]) -> str:
+def _parse_gene_synonyms(synonyms: list[dict[str, str]]) -> str:
     """Return a sorted, pipe separated list of gene synonyms."""
     names = {
         s["component_synonym"]
@@ -74,19 +74,19 @@ def _parse_gene_synonyms(synonyms: List[Dict[str, str]]) -> str:
     return "|".join(sorted(names))
 
 
-def _parse_ec_codes(synonyms: List[Dict[str, str]]) -> str:
+def _parse_ec_codes(synonyms: list[dict[str, str]]) -> str:
     """Return a sorted, pipe separated list of EC numbers."""
     codes = {s["component_synonym"] for s in synonyms if s.get("syn_type") == "EC_NUMBER"}
     return "|".join(sorted(codes))
 
 
-def _parse_alt_names(synonyms: List[Dict[str, str]]) -> str:
+def _parse_alt_names(synonyms: list[dict[str, str]]) -> str:
     """Return a sorted, pipe separated list of UniProt alternative names."""
     names = {s["component_synonym"] for s in synonyms if s.get("syn_type") == "UNIPROT"}
     return "|".join(sorted(names))
 
 
-def _parse_hgnc(xrefs: List[Dict[str, str]]) -> Tuple[str, str]:
+def _parse_hgnc(xrefs: list[dict[str, str]]) -> tuple[str, str]:
     """Extract HGNC name and identifier from a list of cross references."""
     for x in xrefs:
         if x.get("xref_src_db") == "HGNC":
@@ -97,7 +97,7 @@ def _parse_hgnc(xrefs: List[Dict[str, str]]) -> Tuple[str, str]:
     return "", ""
 
 
-def _get_items(container: Any, key: str) -> List[Any]:
+def _get_items(container: Any, key: str) -> list[Any]:
     """Return a list of items from a container that may be a dict or list."""
     if isinstance(container, dict):
         items = container.get(key, [])
@@ -111,7 +111,7 @@ def _get_items(container: Any, key: str) -> List[Any]:
     return []
 
 
-def _chunked(items: List[str], size: int) -> Iterable[List[str]]:
+def _chunked(items: list[str], size: int) -> Iterable[list[str]]:
     """Yield successive ``size``-length chunks from ``items``.
 
     Parameters
@@ -130,7 +130,7 @@ def _chunked(items: List[str], size: int) -> Iterable[List[str]]:
         yield items[i : i + size]
 
 
-def _parse_target_record(data: Dict[str, Any]) -> Dict[str, Any]:
+def _parse_target_record(data: dict[str, Any]) -> dict[str, Any]:
     """Transform a raw target record into a flat dictionary."""
     components = _get_items(data.get("target_components"), "target_component")
     if not components:
@@ -162,7 +162,7 @@ def _parse_target_record(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def get_target(chembl_target_id: str) -> Dict[str, Any]:
+def get_target(chembl_target_id: str) -> dict[str, Any]:
     """Fetch target data from ChEMBL for a single identifier.
 
     Parameters
@@ -323,31 +323,52 @@ def get_assay(chembl_assay_id: str) -> pd.DataFrame:
     return df
 
 
-def get_assays(ids: Iterable[str]) -> pd.DataFrame:
-    """Fetch assay records for ``ids`` in a single request."""
+def get_assays(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
+    """Fetch assay records for ``ids``.
+
+    Parameters
+    ----------
+    ids:
+        Assay identifiers to retrieve.
+    chunk_size:
+        Maximum number of IDs per HTTP request.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Combined assay records.
+    """
     valid = [i for i in ids if i not in {"", "#N/A"}]
     if not valid:
         return pd.DataFrame(columns=ASSAY_COLUMNS)
 
-    url = (
-        "https://www.ebi.ac.uk/chembl/api/data/assay.json?format=json&variant_sequence__isnull=false&assay_chembl_id__in="
-        + ",".join(valid)
-    )
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as exc:  # pragma: no cover - network
-        logger.warning("Bulk assay request failed: %s", exc)
+    records: list[pd.DataFrame] = []
+    for chunk in _chunked(valid, chunk_size):
+        url = (
+            "https://www.ebi.ac.uk/chembl/api/data/assay.json?format=json&variant_sequence__isnull=false&assay_chembl_id__in="
+            + ",".join(chunk)
+        )
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:  # pragma: no cover - network
+            logger.warning("Bulk assay request failed for %s: %s", chunk, exc)
+            continue
+
+        try:
+            data = response.json()
+        except ValueError as exc:  # pragma: no cover - malformed JSON
+            logger.warning("Failed to decode JSON for assays %s: %s", chunk, exc)
+            continue
+
+        items = data.get("assays") or data.get("assay") or []
+        if items:
+            records.append(pd.json_normalize(items))
+
+    if not records:
         return pd.DataFrame(columns=ASSAY_COLUMNS)
 
-    try:
-        data = response.json()
-    except ValueError as exc:  # pragma: no cover - malformed JSON
-        logger.warning("Failed to decode JSON for assays: %s", exc)
-        return pd.DataFrame(columns=ASSAY_COLUMNS)
-
-    items = data.get("assays") or data.get("assay") or []
-    df = pd.json_normalize(items)
+    df = pd.concat(records, ignore_index=True)
     return df.reindex(columns=ASSAY_COLUMNS)
 
 
@@ -376,7 +397,19 @@ DOCUMENT_COLUMNS = [
 
 
 def get_document(chembl_document_id: str) -> pd.DataFrame:
-    """Retrieve document information as a DataFrame."""
+    """Retrieve document information for a single identifier.
+
+    Parameters
+    ----------
+    chembl_document_id:
+        ChEMBL document identifier.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Single-row DataFrame with document data.  An empty DataFrame is
+        returned if the request fails or the ID is blank.
+    """
     if chembl_document_id in {"", "#N/A"}:
         return pd.DataFrame(columns=DOCUMENT_COLUMNS)
 
@@ -400,35 +433,58 @@ def get_document(chembl_document_id: str) -> pd.DataFrame:
     return df.reindex(columns=DOCUMENT_COLUMNS)
 
 
-def get_documents(ids: Iterable[str]) -> pd.DataFrame:
-    """Fetch document records for ``ids`` in a single request."""
+def get_documents(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
+    """Fetch document records for ``ids``.
+
+    Parameters
+    ----------
+    ids:
+        Document identifiers to retrieve.
+    chunk_size:
+        Maximum number of IDs per HTTP request.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Combined document records.
+    """
     valid = [i for i in ids if i not in {"", "#N/A"}]
     if not valid:
         return pd.DataFrame(columns=DOCUMENT_COLUMNS)
 
-    url = (
-        "https://www.ebi.ac.uk/chembl/api/data/document.json?format=json&document_chembl_id__in="
-        + ",".join(valid)
-    )
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as exc:  # pragma: no cover - network
-        logger.warning("Bulk document request failed: %s", exc)
+    records: list[pd.DataFrame] = []
+    for chunk in _chunked(valid, chunk_size):
+        url = (
+            "https://www.ebi.ac.uk/chembl/api/data/document.json?format=json&document_chembl_id__in="
+            + ",".join(chunk)
+        )
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:  # pragma: no cover - network
+            logger.warning("Bulk document request failed for %s: %s", chunk, exc)
+            continue
+
+        try:
+            data = response.json()
+        except ValueError as exc:  # pragma: no cover - malformed JSON
+            logger.warning("Failed to decode JSON for documents %s: %s", chunk, exc)
+            continue
+
+        items = data.get("documents") or data.get("document") or []
+        if items:
+            records.append(pd.json_normalize(items))
+
+    if not records:
         return pd.DataFrame(columns=DOCUMENT_COLUMNS)
 
-    try:
-        data = response.json()
-    except ValueError as exc:  # pragma: no cover - malformed JSON
-        logger.warning("Failed to decode JSON for documents: %s", exc)
-        return pd.DataFrame(columns=DOCUMENT_COLUMNS)
-
-    items = data.get("documents") or data.get("document") or []
-    df = pd.json_normalize(items)
+    df = pd.concat(records, ignore_index=True)
     return df.reindex(columns=DOCUMENT_COLUMNS)
 
 
-def extend_target(df: pd.DataFrame, chembl_column: str = "task_chembl_id") -> pd.DataFrame:
+def extend_target(
+    df: pd.DataFrame, chembl_column: str = "task_chembl_id", chunk_size: int = 50
+) -> pd.DataFrame:
     """Augment a DataFrame with target information.
 
     Parameters
@@ -438,14 +494,23 @@ def extend_target(df: pd.DataFrame, chembl_column: str = "task_chembl_id") -> pd
     chembl_column:
         Name of the column holding the target IDs. Default is
         ``"task_chembl_id"``.
+    chunk_size:
+        Maximum number of IDs per HTTP request when fetching targets.
 
     Returns
     -------
     pandas.DataFrame
         Original data combined with the expanded target information.
     """
-    target_data = df[chembl_column].apply(get_target).apply(pd.Series)
-    target_data = target_data.rename(
+    ids = df[chembl_column].astype(str).tolist()
+    targets = get_targets(ids, chunk_size=chunk_size)
+    merged = df.merge(
+        targets,
+        how="left",
+        left_on=chembl_column,
+        right_on="target_chembl_id",
+    )
+    return merged.rename(
         columns={
             "pref_name": "chembl_pref_name",
             "target_chembl_id": "chembl_target_chembl_id",
@@ -459,40 +524,3 @@ def extend_target(df: pd.DataFrame, chembl_column: str = "task_chembl_id") -> pd
             "HGNC_id": "chembl_HGNC_id",
         }
     )
-    return pd.concat([df.reset_index(drop=True), target_data], axis=1)
-def read_ids(
-    path: str | Path,
-    column: str = "chembl_id",
-    sep: str = ",",
-    encoding: str = "utf8",
-) -> List[str]:
-    """Read identifier values from a CSV file.
-
-    Parameters
-    ----------
-    path : str or Path
-        Path to the CSV file.
-    column : str, optional
-        Name of the column containing identifiers. Defaults to ``"chembl_id"``.
-    sep : str, optional
-        Field delimiter, by default a comma.
-    encoding : str, optional
-        File encoding, by default ``"utf8"``.
-
-    Returns
-    -------
-    list of str
-        Identifier values in the order they appear. Empty strings and ``"#N/A"``
-        markers are discarded.
-
-    Raises
-    ------
-    ValueError
-        If ``column`` is not present in the input file.
-    """
-    df = pd.read_csv(path, sep=sep, encoding=encoding, dtype=str)
-    if column not in df.columns:
-        raise ValueError(f"column '{column}' not found in {path}")
-
-    ids = df[column].dropna().astype(str)
-    return [i for i in ids if i and i != "#N/A"]

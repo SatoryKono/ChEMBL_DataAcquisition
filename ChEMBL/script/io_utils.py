@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
 
 import pandas as pd
 
@@ -11,7 +10,7 @@ def read_ids(
     column: str = "chembl_id",
     sep: str = ",",
     encoding: str = "utf8",
-) -> List[str]:
+) -> list[str]:
     """Read identifier values from a CSV file.
 
     Parameters
@@ -36,7 +35,15 @@ def read_ids(
     ValueError
         If ``column`` is not present in the input file.
     """
-    df = pd.read_csv(path, sep=sep, encoding=encoding, dtype=str)
+    try:
+        df = pd.read_csv(path, sep=sep, encoding=encoding, dtype=str)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"input file not found: {path}") from exc
+    except pd.errors.EmptyDataError as exc:
+        raise ValueError(f"no data in file: {path}") from exc
+    except pd.errors.ParserError as exc:
+        raise ValueError(f"malformed CSV in file: {path}: {exc}") from exc
+
     if column not in df.columns:
         raise ValueError(f"column '{column}' not found in {path}")
 
