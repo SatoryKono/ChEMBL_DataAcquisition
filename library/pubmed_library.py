@@ -283,6 +283,66 @@ def fetch_pubmed(session: requests.Session, pmid: str, sleep: float) -> Dict[str
     return result
 
 
+def fetch_pubmed_batch(
+    session: requests.Session, pmids: List[str], sleep: float
+) -> List[Dict[str, str]]:
+    """Fetch metadata for multiple PMIDs using a single API request.
+
+    Parameters
+    ----------
+    session:
+        Active :class:`requests.Session`.
+    pmids:
+        List of PubMed identifiers.
+    sleep:
+        Seconds to pause after the request.
+
+    Returns
+    -------
+    list of dict
+        One metadata dictionary per PMID in ``pmids``.
+    """
+
+    ids = ",".join(pmids)
+    url = (
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id="
+        f"{ids}&retmode=xml"
+    )
+    text, error = _do_request(session, url, sleep, expect_json=False)
+    results: List[Dict[str, str]] = []
+    if error:
+        for pid in pmids:
+            res = EMPTY_PUBMED.copy()
+            res["PubMed.PMID"] = pid
+            res["PubMed.Error"] = error
+            results.append(res)
+        return results
+    try:
+        root = ET.fromstring(text)  # type: ignore[arg-type]
+    except ET.ParseError as exc:  # pragma: no cover - malformed XML
+        for pid in pmids:
+            res = EMPTY_PUBMED.copy()
+            res["PubMed.PMID"] = pid
+            res["PubMed.Error"] = str(exc)
+            results.append(res)
+        return results
+    articles = root.findall(".//PubmedArticle")
+    parsed: Dict[str, Dict[str, str]] = {}
+    for art in articles:
+        rec = EMPTY_PUBMED.copy()
+        rec.update(parse_pubmed_article(art))
+        parsed[rec.get("PubMed.PMID", "")] = rec
+    for pid in pmids:
+        if pid in parsed:
+            results.append(parsed[pid])
+        else:
+            missing = EMPTY_PUBMED.copy()
+            missing["PubMed.PMID"] = pid
+            missing["PubMed.Error"] = "No PubmedArticle"
+            results.append(missing)
+    return results
+
+
 def fetch_semantic_scholar(session: requests.Session, pmid: str, sleep: float) -> Dict[str, str]:
     fields = "publicationTypes,externalIds,paperId,venue"
     headers = {"Accept": "application/json"}
