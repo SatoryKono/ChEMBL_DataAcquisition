@@ -659,8 +659,18 @@ def collect_info(uid: str, data_dir: str = "uniprot") -> Dict[str, str]:
         with open(json_path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except FileNotFoundError:
-        logger.warning("missing UniProt JSON for %s", uid)
-        return result
+        logger.info("downloading UniProt JSON for %s", uid)
+        data = fetch_uniprot(uid)
+        if not data:
+            logger.warning("failed to retrieve UniProt JSON for %s", uid)
+            return result
+        os.makedirs(data_dir, exist_ok=True)
+        try:
+            with open(json_path, "w", encoding="utf-8") as handle:
+                json.dump(data, handle)
+        except OSError as exc:  # pragma: no cover - disk I/O failure
+            logger.warning("unable to write UniProt JSON for %s: %s", uid, exc)
+            return result
     except json.JSONDecodeError:
         logger.warning("malformed UniProt JSON for %s", uid)
         return result
