@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 EXPECTED_TARGET_COLUMNS: tuple[str, ...] = (
-    "chembl_id",
+    "target_id",
     "uniprot_id",
     "hgnc_name",
     "hgnc_id",
@@ -94,6 +94,7 @@ def load_targets(path: str | Path, *, encoding: str = "utf-8") -> pd.DataFrame:
     # Normalise legacy column names to the expected lowercase form
     df = df.rename(
         columns={
+            "GuidetoPHARMACOLOGY": "target_id",
             "HGNC_NAME": "hgnc_name",
             "HGNC_name": "hgnc_name",
             "HGNC_ID": "hgnc_id",
