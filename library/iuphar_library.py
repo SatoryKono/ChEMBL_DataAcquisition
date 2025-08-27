@@ -321,11 +321,13 @@ class IUPHARData:
     ) -> pd.DataFrame:
         """Map UniProt IDs to classification data and write a CSV output.
 
-        The input CSV must contain a ``uniprot_id`` column. If a UniProt lookup
-        fails, optional columns ``hgnc_name``, ``hgnc_id``, ``gene_name`` and
-        ``synonyms`` (pipe-delimited) are consulted in that order to resolve a
-        target identifier. Each accession is translated to the corresponding
-        IUPHAR target identifier and a full classification record. The
+        The input CSV must contain a ``uniprot_id`` column. If the file
+        includes a ``GuidetoPHARMACOLOGY`` column, non-empty values are taken
+        as the target identifier. For rows lacking this cross-reference, the
+        function attempts to resolve the target via the UniProt accession. If
+        that fails, optional columns ``hgnc_name``, ``hgnc_id``, ``gene_name``
+        and ``synonyms`` (pipe-delimited) are consulted in that order.
+        Successful lookups are translated to a full IUPHAR classification. The
         resulting table includes the target ID, class, subclass, and family
         chain in addition to the full ID and name paths. If no target can be
         resolved, an optional ``ec_number`` column is used to derive
@@ -354,10 +356,21 @@ class IUPHARData:
 
         classifier = IUPHARClassifier(self)
 
-        # Resolve target identifiers with a series of fallbacks. The search
-        # order mimics the Power Query logic: UniProt accession, HGNC name,
+        # Start with explicit GuidetoPHARMACOLOGY mappings when available. The
+        # UniProt export may provide this cross-reference directly and it takes
+        # precedence over any derived lookups.
+        if "GuidetoPHARMACOLOGY" in df.columns:
+            df["target_id"] = df["GuidetoPHARMACOLOGY"].str.split("|").str[0]
+        else:
+            df["target_id"] = ""
+
+        # Resolve remaining identifiers with a series of fallbacks. The search
+        # order mirrors the Power Query logic: UniProt accession, HGNC name,
         # HGNC ID, gene symbol and finally any supplied synonyms.
-        df["target_id"] = df["uniprot_id"].apply(self.target_id_by_uniprot)
+        mask = df["target_id"].eq("")
+        df.loc[mask, "target_id"] = df.loc[mask, "uniprot_id"].apply(
+            self.target_id_by_uniprot
+        )
 
         if "hgnc_name" in df.columns:
             mask = df["target_id"].eq("")

@@ -24,12 +24,17 @@ def test_map_uniprot_file(tmp_path: Path) -> None:
         "100,FamilyX,,0001,Enzyme.Lyase\n",
         encoding="utf-8",
     )
-    input_csv.write_text("uniprot_id;hgnc_name\nQ12345;GeneX\n", encoding="utf-8")
+    input_csv.write_text(
+        "uniprot_id;GuidetoPHARMACOLOGY;hgnc_name\n"
+        "Q99999;0001;\n"
+        "Q12345;;\n",
+        encoding="utf-8",
+    )
 
     data = IUPHARData.from_files(target_csv, family_csv)
     df = data.map_uniprot_file(input_csv, output_csv, sep=";")
 
     assert output_csv.exists()
     out_df = pd.read_csv(output_csv, sep=";", dtype=str)
-    assert out_df.loc[0, "target_id"] == "0001"
-    assert df.loc[0, "target_id"] == "0001"
+    assert list(out_df["target_id"]) == ["0001", "0001"]
+    assert list(df["target_id"]) == ["0001", "0001"]
