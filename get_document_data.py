@@ -162,11 +162,22 @@ def run_all(args: argparse.Namespace) -> int:
             logger.error("failed to write output CSV: %s", exc)
             return 1
 
-    pmids = [str(p) for p in doc_df["pubmed_id"].dropna().astype(int).tolist()]
+    # Normalise PubMed identifiers to strings to avoid dtype mismatches
+    pubmed_ids = pd.to_numeric(doc_df["pubmed_id"], errors="coerce").astype("Int64")
+    pmids = pubmed_ids.dropna().astype(str).tolist()
     pub_df = fetch_pubmed_records(pmids, args.sleep)
-    merged = doc_df.merge(
-        pub_df, how="left", left_on="pubmed_id", right_on="PubMed.PMID"
-    )
+    doc_df["pubmed_id"] = pubmed_ids.astype(str)
+    if not pub_df.empty and "PubMed.PMID" in pub_df.columns:
+        pub_df["PubMed.PMID"] = (
+            pd.to_numeric(pub_df["PubMed.PMID"], errors="coerce")
+            .astype("Int64")
+            .astype(str)
+        )
+        merged = doc_df.merge(
+            pub_df, how="left", left_on="pubmed_id", right_on="PubMed.PMID"
+        )
+    else:
+        merged = doc_df
     try:
         merged.to_csv(args.output_csv, index=False)
         logger.info("Wrote %d rows to %s", len(merged), args.output_csv)
