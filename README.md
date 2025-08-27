@@ -4,16 +4,29 @@ Utilities for downloading and integrating target information from
 [ChEMBL](https://www.ebi.ac.uk/chembl/),
 [UniProt](https://www.uniprot.org/) and the
 [IUPHAR Guide to Pharmacology](https://www.guidetopharmacology.org/).
+It also provides helpers for collecting publication metadata from
+PubMed, Semantic Scholar, OpenAlex and CrossRef.
 
-The repository exposes a single command line script `get_target_data.py`
-which can query each data source individually or run the combined
-pipeline to generate a unified CSV table.
+Two command line tools are available:
+
+`get_target_data.py`
+    Query biological data sources individually or run the combined
+    pipeline to generate a unified CSV table.
+
+`get_document_data.py`
+    Retrieve document information from the services listed above.
 
 ## Installation
 
+Install the runtime dependencies:
+
 ```bash
-pip install pandas>=2.0 requests>=2.31
-# Optional: type stubs for development
+pip install -r requirements.txt
+```
+
+Optional type stubs for development:
+
+```bash
 pip install pandas-stubs types-requests
 ```
 
@@ -44,46 +57,68 @@ python get_target_data.py iuphar uniprot_results.csv iuphar_results.csv \
     --family-csv data/_IUPHAR_family.csv
 ```
 
-Run the full pipeline (ChEMBL â†’ UniProt â†’ IUPHAR) starting from a CSV
-with a single `chembl_id` column:
+### Document metadata
+
+Fetch PubMed, Semantic Scholar, OpenAlex and CrossRef records for PMIDs
+listed in `pmids.csv`:
 
 ```bash
-python get_target_data.py all targets.csv merged.csv \
-    --data-dir uniprot \
-    --target-csv data/_IUPHAR_target.csv \
-    --family-csv data/_IUPHAR_family.csv
+python get_document_data.py pubmed pmids.csv document_data.csv
 ```
 
-Intermediate results can be retained with `--chembl-out`, `--uniprot-out`
-and `--iuphar-out`.
-
-## Development
-
-Format and lint the code:
+Retrieve document information from the ChEMBL API for the identifiers in
+`docs.csv`:
 
 ```bash
-black .
-ruff check .
+python get_document_data.py chembl docs.csv chembl_docs.csv
 ```
 
-Run the test-suite:
+Run both pipelines and merge the outputs:
 
 ```bash
-pytest -q
+python get_document_data.py all docs.csv merged_docs.csv
 ```
 
-Static type checking (requires stub packages):
+get_target(chembl_target_id) / get_targets(ids, chunk_size=50) - fetch single/multiple targets, normalize fields (name, ChEMBL ID, HGNC, EC, etc.), robust to network errors.
+get_assay(chembl_assay_id) / get_assays(ids, chunk_size=50) - load and normalize assay records.
 
-```bash
-mypy --explicit-package-bases get_target_data.py library
-```
+get_document(chembl_document_id) / get_documents(ids, chunk_size=50) - publication metadata from ChEMBL.
+extend_target(df, chembl_column="task_chembl_id", chunk_size=50) - join an input table with extended ChEMBL target information.
+load_targets(path), load_families(path) - read CSV as strings, normalize headers, validate required columns.
+IUPHARData.from_files(target_path, family_path) - container with target_df and family_df.
+family_chain(start_id) - build parent_family_id chain.
+target_id_by_uniprot / hgnc_name / hgnc_id / gene / name - map target IDs by identifiers and synonyms.
 
-## Example Data
+family_id_by_name, all_id, all_name - recover full ID/name paths.
+map_uniprot_file(input_csv, output_csv, sep=",", encoding="utf-8") - read UniProt CSV, resolve to IUPHAR, add type/class/subclass, chain, full paths, write output.
 
-A small `targets.csv` file is provided in the repository containing a
-`chembl_id` column for smoke testing.
+ClassificationRecord - classification result structure.
 
+Pipeline: process_compound(compound_name) - single call to retrieve all fields.
 
+Load: fetch_uniprot(uniprot_id) - direct REST request.
+extract_names(data) - protein and gene names.
+extract_organism(data) - taxonomy (genus, superkingdom, phylum, taxon_id).
+extract_keywords(data) - MF/CC keywords, EC, subcellular location, topology, membrane flags.
+
+extract_ptm(data) - PTM feature flags.
+
+extract_isoform(data) - isoform names/IDs/synonyms.
+extract_crossrefs(data) - selected external DBs.
+extract_activity(data) - catalytic reactions and EC numbers.
+
+iter_ids(csv_path, ...) - yield UniProt IDs from CSV.
+
+collect_info(uid, data_dir="uniprot") - gather all fields from local <uid>.json.
+process(input_csv, output_csv, data_dir="uniprot", ...) - batch processing to CSV.
+read_ids(path, column="chembl_id", ...) - safe reading of IDs from CSV.
+
+build_parser() - defines CLI with subcommands:
+
+CLI (get_target_data.py) - entry point.
+test_iuphar_mapping.py - verifies map_uniprot_file maps UniProt ID to target ID and writes expected CSV.
+
+test_read_ids.py - validates read_ids: filtering of empty/#N/A, error when column missing.
 Project structure and purpose of modules
 chembl_library.py
 
@@ -91,13 +126,13 @@ Role: utilities for retrieving targets, assays, and documents from ChEMBL, with 
 
 Key functions:
 
-get_target(chembl_target_id) / get_targets(ids, chunk_size=50) — fetch single/multiple targets, normalize fields (name, ChEMBL ID, HGNC, EC, etc.), robust to network errors.
+get_target(chembl_target_id) / get_targets(ids, chunk_size=50) â€” fetch single/multiple targets, normalize fields (name, ChEMBL ID, HGNC, EC, etc.), robust to network errors.
 
-get_assay(chembl_assay_id) / get_assays(ids, chunk_size=50) — load and normalize assay records.
+get_assay(chembl_assay_id) / get_assays(ids, chunk_size=50) â€” load and normalize assay records.
 
-get_document(chembl_document_id) / get_documents(ids, chunk_size=50) — publication metadata from ChEMBL.
+get_document(chembl_document_id) / get_documents(ids, chunk_size=50) â€” publication metadata from ChEMBL.
 
-extend_target(df, chembl_column="task_chembl_id", chunk_size=50) — join an input table with extended ChEMBL target information.
+extend_target(df, chembl_column="task_chembl_id", chunk_size=50) â€” join an input table with extended ChEMBL target information.
 
 iuphar_library.py
 
@@ -107,25 +142,25 @@ Key components:
 
 Data loading and validation:
 
-load_targets(path), load_families(path) — read CSV as strings, normalize headers, validate required columns.
+load_targets(path), load_families(path) â€” read CSV as strings, normalize headers, validate required columns.
 
-IUPHARData.from_files(target_path, family_path) — container with target_df and family_df.
+IUPHARData.from_files(target_path, family_path) â€” container with target_df and family_df.
 
 Navigation and mapping:
 
-family_chain(start_id) — build parent_family_id chain.
+family_chain(start_id) â€” build parent_family_id chain.
 
-target_id_by_uniprot / hgnc_name / hgnc_id / gene / name — map target IDs by identifiers and synonyms.
+target_id_by_uniprot / hgnc_name / hgnc_id / gene / name â€” map target IDs by identifiers and synonyms.
 
-family_id_by_name, all_id, all_name — recover full ID/name paths.
+family_id_by_name, all_id, all_name â€” recover full ID/name paths.
 
 Batch mapping:
 
-map_uniprot_file(input_csv, output_csv, sep=",", encoding="utf-8") — read UniProt CSV, resolve to IUPHAR, add type/class/subclass, chain, full paths, write output.
+map_uniprot_file(input_csv, output_csv, sep=",", encoding="utf-8") â€” read UniProt CSV, resolve to IUPHAR, add type/class/subclass, chain, full paths, write output.
 
 Classification:
 
-ClassificationRecord — classification result structure.
+ClassificationRecord â€” classification result structure.
 
 IUPHARClassifier with methods by_target_id, by_uniprot_id, by_family_id, by_ec_number, by_name, and get(...).
 
@@ -141,7 +176,7 @@ CID lookup: get_cid(compound_name) (exact), get_all_cid(compound_name) (partial)
 
 Metadata: get_standard_name(cid), get_properties(cid) ? Properties (IUPAC, formula, SMILES, InChI/Key).
 
-Pipeline: process_compound(compound_name) — single call to retrieve all fields.
+Pipeline: process_compound(compound_name) â€” single call to retrieve all fields.
 
 uniprot_library.py
 
@@ -149,31 +184,31 @@ Role: parsing UniProt JSON and batch processing local annotation files.
 
 Key functions:
 
-Load: fetch_uniprot(uniprot_id) — direct REST request.
+Load: fetch_uniprot(uniprot_id) â€” direct REST request.
 
 Extract from entry:
 
-extract_names(data) — protein and gene names.
+extract_names(data) â€” protein and gene names.
 
-extract_organism(data) — taxonomy (genus, superkingdom, phylum, taxon_id).
+extract_organism(data) â€” taxonomy (genus, superkingdom, phylum, taxon_id).
 
-extract_keywords(data) — MF/CC keywords, EC, subcellular location, topology, membrane flags.
+extract_keywords(data) â€” MF/CC keywords, EC, subcellular location, topology, membrane flags.
 
-extract_ptm(data) — PTM feature flags.
+extract_ptm(data) â€” PTM feature flags.
 
-extract_isoform(data) — isoform names/IDs/synonyms.
+extract_isoform(data) â€” isoform names/IDs/synonyms.
 
-extract_crossrefs(data) — selected external DBs.
+extract_crossrefs(data) â€” selected external DBs.
 
-extract_activity(data) — catalytic reactions and EC numbers.
+extract_activity(data) â€” catalytic reactions and EC numbers.
 
 Streams:
 
-iter_ids(csv_path, ...) — yield UniProt IDs from CSV.
+iter_ids(csv_path, ...) â€” yield UniProt IDs from CSV.
 
-collect_info(uid, data_dir="uniprot") — gather all fields from local <uid>.json.
+collect_info(uid, data_dir="uniprot") â€” gather all fields from local <uid>.json.
 
-process(input_csv, output_csv, data_dir="uniprot", ...) — batch processing to CSV.
+process(input_csv, output_csv, data_dir="uniprot", ...) â€” batch processing to CSV.
 
 get_target_data.py
 
@@ -181,9 +216,9 @@ Role: CLI wrapper around UniProt/ChEMBL/IUPHAR libraries.
 
 Key parts:
 
-read_ids(path, column="chembl_id", ...) — safe reading of IDs from CSV.
+read_ids(path, column="chembl_id", ...) â€” safe reading of IDs from CSV.
 
-build_parser() — defines CLI with subcommands:
+build_parser() â€” defines CLI with subcommands:
 
 uniprot ? calls uniprot_library.process.
 
@@ -195,7 +230,7 @@ Runtime: configure_logging, run_uniprot, run_chembl, run_iuphar, main.
 
 Module interaction
 
-CLI (get_target_data.py) — entry point.
+CLI (get_target_data.py) â€” entry point.
 
 uniprot subcommand ? uniprot_library.process.
 
@@ -205,6 +240,6 @@ iuphar subcommand ? IUPHARData + map_uniprot_file.
 
 Tests
 
-test_iuphar_mapping.py — verifies map_uniprot_file maps UniProt ID to target ID and writes expected CSV.
+test_iuphar_mapping.py â€” verifies map_uniprot_file maps UniProt ID to target ID and writes expected CSV.
 
-test_read_ids.py — validates read_ids: filtering of empty/#N/A, error when column missing.
+test_read_ids.py â€” validates read_ids: filtering of empty/#N/A, error when column missing.

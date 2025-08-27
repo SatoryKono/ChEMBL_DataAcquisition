@@ -41,8 +41,22 @@ import os
 from typing import Any, Dict, Iterable, List, Set
 
 import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
+
+# Shared HTTP session with retry/backoff to make network calls more robust.
+_retry = Retry(
+    total=3,
+    backoff_factor=1.0,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+)
+_session: Session = requests.Session()
+_session.mount("http://", HTTPAdapter(max_retries=_retry))
+_session.mount("https://", HTTPAdapter(max_retries=_retry))
 
 API_URL = "https://rest.uniprot.org/uniprotkb/{id}.json"
 
@@ -78,14 +92,16 @@ def fetch_uniprot(uniprot_id: str) -> Dict[str, Any]:
 
     url = API_URL.format(id=uniprot_id)
     try:
-        resp = requests.get(url, timeout=30)
+        resp = _session.get(url, timeout=30)
         resp.raise_for_status()
-        return resp.json()
+        try:
+            return resp.json()
+        except json.JSONDecodeError as exc:  # pragma: no cover - malformed JSON
+            logger.warning("Failed to decode JSON for UniProt %s: %s", uniprot_id, exc)
+            return {}
     except requests.RequestException as exc:  # pragma: no cover - network
         logger.warning("UniProt request failed for %s: %s", uniprot_id, exc)
-    except json.JSONDecodeError as exc:  # pragma: no cover - malformed JSON
-        logger.warning("Failed to decode JSON for UniProt %s: %s", uniprot_id, exc)
-    return {}
+        return {}
 
 
 def _collect_name_fields(name_obj: Dict[str, Any]) -> Iterable[str]:
