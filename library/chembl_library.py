@@ -91,7 +91,9 @@ def _parse_gene_synonyms(synonyms: list[dict[str, str]]) -> str:
 
 def _parse_ec_codes(synonyms: list[dict[str, str]]) -> str:
     """Return a sorted, pipe separated list of EC numbers."""
-    codes = {s["component_synonym"] for s in synonyms if s.get("syn_type") == "EC_NUMBER"}
+    codes = {
+        s["component_synonym"] for s in synonyms if s.get("syn_type") == "EC_NUMBER"
+    }
     return "|".join(sorted(codes))
 
 
@@ -217,9 +219,7 @@ def get_target(chembl_target_id: str) -> dict[str, Any]:
     if chembl_target_id in {"", "#N/A"}:
         return dict(EMPTY_TARGET)
 
-    url = (
-        f"https://www.ebi.ac.uk/chembl/api/data/target/{chembl_target_id}?format=json"
-    )
+    url = f"https://www.ebi.ac.uk/chembl/api/data/target/{chembl_target_id}?format=json"
     try:
         response = _session.get(url, timeout=30)
         response.raise_for_status()
@@ -289,9 +289,7 @@ def get_targets(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
 # Assay utilities
 # ----------------------------
 
-ASSAY_URL = (
-    "https://www.ebi.ac.uk/chembl/api/data/assay/{id}?format=json&variant_sequence__isnull=false"
-)
+ASSAY_URL = "https://www.ebi.ac.uk/chembl/api/data/assay/{id}?format=json&variant_sequence__isnull=false"
 
 ASSAY_COLUMNS = [
     "aidx",
@@ -482,6 +480,78 @@ def get_activities(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
 
     df = pd.concat(records, ignore_index=True)
     return df.reindex(columns=ACTIVITY_COLUMNS)
+
+
+# ----------------------------
+# Test item (compound) utilities
+# ----------------------------
+
+TESTITEM_URL = "https://www.ebi.ac.uk/chembl/api/data/molecule/{id}?format=json"
+
+TESTITEM_COLUMNS = [
+    "molecule_chembl_id",
+    "pref_name",
+    "max_phase",
+    "molecule_type",
+    "first_approval",
+    "oral",
+    "parenteral",
+    "topical",
+    "black_box_warning",
+    "structure_type",
+    "molecule_structures.canonical_smiles",
+    "molecule_structures.standard_inchi",
+    "molecule_structures.standard_inchi_key",
+]
+
+
+def get_testitem(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
+    """Fetch compound records for ``ids``.
+
+    Parameters
+    ----------
+    ids:
+        Molecule identifiers to retrieve.
+    chunk_size:
+        Maximum number of IDs per HTTP request.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Combined compound records.
+    """
+    valid = [i for i in ids if i not in {"", "#N/A"}]
+    if not valid:
+        return pd.DataFrame(columns=TESTITEM_COLUMNS)
+
+    records: list[pd.DataFrame] = []
+    for chunk in _chunked(valid, chunk_size):
+        url = (
+            "https://www.ebi.ac.uk/chembl/api/data/molecule.json?format=json&molecule_chembl_id__in="
+            + ",".join(chunk)
+        )
+        try:
+            response = _session.get(url, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:  # pragma: no cover - network
+            logger.warning("Bulk molecule request failed for %s: %s", chunk, exc)
+            continue
+
+        try:
+            data = response.json()
+        except ValueError as exc:  # pragma: no cover - malformed JSON
+            logger.warning("Failed to decode JSON for molecules %s: %s", chunk, exc)
+            continue
+
+        items = data.get("molecules") or data.get("molecule") or []
+        if items:
+            records.append(pd.json_normalize(items))
+
+    if not records:
+        return pd.DataFrame(columns=TESTITEM_COLUMNS)
+
+    df = pd.concat(records, ignore_index=True)
+    return df.reindex(columns=TESTITEM_COLUMNS)
 
 
 # ----------------------------

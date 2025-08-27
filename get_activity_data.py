@@ -8,8 +8,6 @@ import logging
 from pathlib import Path
 from typing import Sequence
 
-import pandas as pd
-
 from library import chembl_library as cl
 
 logger = logging.getLogger(__name__)
