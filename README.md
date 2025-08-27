@@ -7,7 +7,7 @@ Utilities for downloading and integrating target information from
 It also provides helpers for collecting publication metadata from
 PubMed, Semantic Scholar, OpenAlex and CrossRef.
 
-Two command line tools are available:
+Three command line tools are available:
 
 `get_target_data.py`
     Query biological data sources individually or run the combined
@@ -15,6 +15,9 @@ Two command line tools are available:
 
 `get_document_data.py`
     Retrieve document information from the services listed above.
+
+`get_assay_data.py`
+    Fetch assay information from the ChEMBL API for a list of assay IDs.
 
 ## Installation
 
@@ -55,6 +58,15 @@ Map UniProt IDs to IUPHAR classifications:
 python get_target_data.py iuphar uniprot_results.csv iuphar_results.csv \
     --target-csv data/_IUPHAR_target.csv \
     --family-csv data/_IUPHAR_family.csv
+```
+
+### Assay metadata
+
+Retrieve assay information from the ChEMBL API for identifiers listed in
+`assays.csv`:
+
+```bash
+python get_assay_data.py assays.csv assay_results.csv
 ```
 
 ### Document metadata
