@@ -76,7 +76,10 @@ def load_targets(path: str | Path, *, encoding: str = "utf-8") -> pd.DataFrame:
     The ``target_id`` and ``family_id`` columns in the official files are
     zero-padded strings. Reading them as numeric values would drop the
     padding and break lookups.  To avoid this, all columns are read as
-    strings and missing values are replaced with empty strings.
+    strings and missing values are replaced with empty strings.  The
+    original data uses the column name ``swissprot`` for UniProt accession
+    numbers; this is normalised to ``uniprot_id`` for consistency with the
+    rest of the library.
 
     Parameters
     ----------
@@ -99,6 +102,7 @@ def load_targets(path: str | Path, *, encoding: str = "utf-8") -> pd.DataFrame:
             "HGNC_name": "hgnc_name",
             "HGNC_ID": "hgnc_id",
             "HGNC_id": "hgnc_id",
+            "swissprot": "uniprot_id",
         }
     )
     _validate_columns(df, EXPECTED_TARGET_COLUMNS)
