@@ -31,6 +31,7 @@ from typing import Sequence
 
 import pandas as pd
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from library import chembl_library as cl
 from library import pubmed_library as pl
@@ -83,23 +84,71 @@ def read_ids(
         raise ValueError(f"malformed CSV in file: {path}: {exc}") from exc
 
 
-def fetch_pubmed_records(pmids: list[str], sleep: float) -> pd.DataFrame:
-    """Retrieve metadata for a list of PubMed identifiers."""
+def fetch_pubmed_records(
+    pmids: list[str],
+    sleep: float,
+    max_workers: int = 1,
+    batch_size: int = 200,
+) -> pd.DataFrame:
+    """Retrieve metadata for a list of PubMed identifiers.
+
+    Parameters
+    ----------
+    pmids:
+        Identifiers to query.
+    sleep:
+        Seconds to pause between API requests.
+    max_workers:
+        Maximum number of concurrent threads.
+    batch_size:
+        Maximum number of PMIDs per PubMed request.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Combined metadata from the different sources.
+    """
+
+    def _fetch_batch(batch: list[str]) -> list[dict[str, str]]:
+        """Fetch metadata for a batch of PMIDs.
+
+        Each worker opens its own :class:`requests.Session` and retrieves PubMed
+        entries for all PMIDs in ``batch`` using a single request. Metadata from
+        Semantic Scholar, OpenAlex and CrossRef are then fetched individually
+        for each PMID. Exceptions are logged so a failure in one batch does not
+        abort the whole process.
+        """
+
+        try:
+            with requests.Session() as session:
+                pubmed_list = pl.fetch_pubmed_batch(session, batch, sleep)
+                combined_records: list[dict[str, str]] = []
+                for pubmed in pubmed_list:
+                    pmid = pubmed.get("PubMed.PMID", "")
+                    semsch = ssl.fetch_semantic_scholar(session, pmid, sleep)
+                    openalex = ocl.fetch_openalex(session, pmid, sleep)
+                    doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
+                    crossref = ocl.fetch_crossref(session, doi, sleep)
+                    combined: dict[str, str] = {}
+                    combined.update(pubmed)
+                    combined.update(semsch)
+                    combined.update(openalex)
+                    combined.update(crossref)
+                    combined_records.append(combined)
+                return combined_records
+        except Exception as exc:  # pragma: no cover - network errors
+            logger.warning("failed to fetch PMIDs %s: %s", batch, exc)
+            return [{} for _ in batch]
+
+    if not pmids:
+        return pd.DataFrame()
 
     records: list[dict[str, str]] = []
-    with requests.Session() as session:
-        for pmid in pmids:
-            pubmed = pl.fetch_pubmed(session, pmid, sleep)
-            semsch = ssl.fetch_semantic_scholar(session, pmid, sleep)
-            openalex = ocl.fetch_openalex(session, pmid, sleep)
-            doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
-            crossref = ocl.fetch_crossref(session, doi, sleep)
-            combined: dict[str, str] = {}
-            combined.update(pubmed)
-            combined.update(semsch)
-            combined.update(openalex)
-            combined.update(crossref)
-            records.append(combined)
+    batches = [pmids[i : i + batch_size] for i in range(0, len(pmids), batch_size)]
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_fetch_batch, batch) for batch in batches]
+        for future in as_completed(futures):
+            records.extend(future.result())
 
     if not records:
         return pd.DataFrame()
@@ -111,7 +160,7 @@ def run_pubmed(args: argparse.Namespace) -> int:
 
     try:
         pmids = pl.read_pmids(args.input_csv)
-        df = fetch_pubmed_records(pmids, args.sleep)
+        df = fetch_pubmed_records(pmids, args.sleep, args.workers, args.batch_size)
         df.to_csv(args.output_csv, index=False)
         logger.info("Wrote %d rows to %s", len(df), args.output_csv)
         return 0
@@ -165,7 +214,7 @@ def run_all(args: argparse.Namespace) -> int:
     # Normalise PubMed identifiers to strings to avoid dtype mismatches
     pubmed_ids = pd.to_numeric(doc_df["pubmed_id"], errors="coerce").astype("Int64")
     pmids = pubmed_ids.dropna().astype(str).tolist()
-    pub_df = fetch_pubmed_records(pmids, args.sleep)
+    pub_df = fetch_pubmed_records(pmids, args.sleep, args.workers, args.batch_size)
     doc_df["pubmed_id"] = pubmed_ids.astype(str)
     if not pub_df.empty and "PubMed.PMID" in pub_df.columns:
         pub_df["PubMed.PMID"] = (
@@ -198,10 +247,21 @@ def build_parser() -> argparse.ArgumentParser:
     pubmed.add_argument(
         "--sleep", type=float, default=5.0, help="Seconds to sleep between requests"
     )
+    pubmed.add_argument(
+        "--workers", type=int, default=1, help="Number of concurrent requests"
+    )
+    pubmed.add_argument(
+        "--batch-size",
+        type=int,
+        default=200,
+        help="Maximum PMIDs per PubMed request",
+    )
     pubmed.set_defaults(func=run_pubmed)
 
     chembl = sub.add_parser("chembl", help="Fetch document information from ChEMBL")
-    chembl.add_argument("input_csv", type=Path, help="CSV with document_chembl_id column")
+    chembl.add_argument(
+        "input_csv", type=Path, help="CSV with document_chembl_id column"
+    )
     chembl.add_argument("output_csv", type=Path, help="Destination CSV file")
     chembl.add_argument(
         "--column", default="chembl_id", help="Column name containing identifiers"
@@ -214,7 +274,9 @@ def build_parser() -> argparse.ArgumentParser:
     chembl.set_defaults(func=run_chembl)
 
     all_cmd = sub.add_parser("all", help="Run both ChEMBL and PubMed pipelines")
-    all_cmd.add_argument("input_csv", type=Path, help="CSV with document_chembl_id column")
+    all_cmd.add_argument(
+        "input_csv", type=Path, help="CSV with document_chembl_id column"
+    )
     all_cmd.add_argument("output_csv", type=Path, help="Destination CSV file")
     all_cmd.add_argument(
         "--column", default="chembl_id", help="Column in the input CSV"
@@ -225,7 +287,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--chunk-size", type=int, default=5, help="Maximum IDs per request"
     )
     all_cmd.add_argument(
-        "--sleep", type=float, default=5.0, help="Seconds to sleep between PubMed requests"
+        "--sleep",
+        type=float,
+        default=5.0,
+        help="Seconds to sleep between PubMed requests",
+    )
+    all_cmd.add_argument(
+        "--workers", type=int, default=1, help="Number of concurrent PubMed requests"
+    )
+    all_cmd.add_argument(
+        "--batch-size",
+        type=int,
+        default=200,
+        help="Maximum PMIDs per PubMed request",
     )
     all_cmd.set_defaults(func=run_all)
 
