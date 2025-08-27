@@ -284,6 +284,79 @@ def get_targets(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
     df = pd.DataFrame(records)
     return df.reindex(columns=TARGET_FIELDS)
 
+# ----------------------------
+# Activity utilities
+# ----------------------------
+
+ACTIVITY_URL = "https://www.ebi.ac.uk/chembl/api/data/activity/{id}?format=json"
+
+ACTIVITY_COLUMNS = [
+    "activity_id",
+    "assay_chembl_id",
+    "document_chembl_id",
+    "molecule_chembl_id",
+    "standard_type",
+    "standard_value",
+    "standard_units",
+    "standard_relation",
+    "pchembl_value",
+    "activity_comment",
+    "data_validity_comment",
+    "potential_duplicate",
+    "bao_label",
+    "src_id",
+    "src_assay_id",
+]
+
+
+def get_activities(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
+    """Fetch activity records for ``ids``.
+
+    Parameters
+    ----------
+    ids:
+        Activity identifiers to retrieve.
+    chunk_size:
+        Maximum number of IDs per HTTP request.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Combined activity records.
+    """
+    valid = [i for i in ids if i not in {"", "#N/A"}]
+    if not valid:
+        return pd.DataFrame(columns=ACTIVITY_COLUMNS)
+
+    records: list[pd.DataFrame] = []
+    for chunk in _chunked(valid, chunk_size):
+        url = (
+            "https://www.ebi.ac.uk/chembl/api/data/activity.json?format=json&activity_id__in="
+            + ",".join(chunk)
+        )
+        try:
+            response = _session.get(url, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:  # pragma: no cover - network
+            logger.warning("Bulk activity request failed for %s: %s", chunk, exc)
+            continue
+
+        try:
+            data = response.json()
+        except ValueError as exc:  # pragma: no cover - malformed JSON
+            logger.warning("Failed to decode JSON for activities %s: %s", chunk, exc)
+            continue
+
+        items = data.get("activities") or data.get("activity") or []
+        if items:
+            records.append(pd.json_normalize(items))
+
+    if not records:
+        return pd.DataFrame(columns=ACTIVITY_COLUMNS)
+
+    df = pd.concat(records, ignore_index=True)
+    return df.reindex(columns=ACTIVITY_COLUMNS)
+
 
 # ----------------------------
 # Assay utilities
