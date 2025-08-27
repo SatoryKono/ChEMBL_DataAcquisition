@@ -1,16 +1,28 @@
+"""Utilities for retrieving publication metadata from external services.
+
+The helpers in this module abstract the HTTP communication with a number of
+public APIs such as PubMed, Semantic Scholar, OpenAlex and CrossRef.  They are
+intended to be reused by command line tools and other libraries.
+
+Network failures or malformed responses yield dictionaries populated with
+empty strings and an ``Error`` field describing the failure.  Callers should
+inspect this field when post-processing the results.
+"""
+
 from __future__ import annotations
 
-import argparse
 import csv
 import json
-import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
+import logging
 import requests
 from xml.etree import ElementTree as ET
 from urllib.parse import quote
+
+logger = logging.getLogger(__name__)
 
 ENCODINGS = ["utf-8-sig", "cp1251", "latin1"]
 TIMEOUT = 10
@@ -67,8 +79,6 @@ def _do_request(
     for attempt in range(retries + 1):
         if attempt:
             time.sleep(sleep * attempt)
-        else:
-            time.sleep(sleep)
         try:
             resp = session.get(url, timeout=TIMEOUT, **kwargs)
         except requests.RequestException as exc:
@@ -104,8 +114,8 @@ def text_or_none(node: Optional[ET.Element]) -> Optional[str]:
 
 
 def combine(items: Iterable[str]) -> str:
-    """Combine non-empty items into a pipe separated string."""
-    return "| ".join([x for x in items if x])
+    """Combine non-empty items into a pipe-separated string."""
+    return "|".join([x for x in items if x])
 
 
 def find_one(node: Optional[ET.Element], xpath: str) -> Optional[ET.Element]:
@@ -389,77 +399,3 @@ def fetch_crossref(session: requests.Session, doi: str, sleep: float) -> Dict[st
         "crossref.Subject": subject,
         "crossref.Error": "",
     }
-
-
-def print_results(records: List[Dict[str, str]]):
-    try:
-        from tabulate import tabulate  # type: ignore
-
-        use_tabulate = True
-    except Exception:
-        use_tabulate = False
-
-    display_records = []
-    for rec in records:
-        d = rec.copy()
-        title = (
-            d.get("PubMed.ArticleTitle")
-            or d.get("crossref.Title")
-            or d.get("Title")
-            or ""
-        )
-        d["Title"] = title[:77] + "..." if len(title) > 80 else title
-        display_records.append(d)
-
-    if use_tabulate:
-        output = tabulate(display_records, headers="keys")
-    else:
-        output = json.dumps(display_records, ensure_ascii=False, indent=2)
-
-    try:
-        print(output)
-    except UnicodeEncodeError:
-        encoded = output.encode(sys.stdout.encoding or "utf-8", errors="replace")
-        sys.stdout.buffer.write(encoded + b"\n")
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Fetch publication metadata by PMID"
-    )
-    parser.add_argument("-i", "--input", required=True, help="Input CSV path with PMID column")
-    parser.add_argument("-o", "--output", required=True, help="Output CSV path")
-    parser.add_argument("--sleep", type=float, default=5.0, help="Sleep between requests")
-    args = parser.parse_args()
-
-    pmids = read_pmids(args.input)
-    records: List[Dict[str, str]] = []
-    with requests.Session() as session:
-        for pmid in pmids:
-            pubmed = fetch_pubmed(session, pmid, args.sleep)
-            semsch = fetch_semantic_scholar(session, pmid, args.sleep)
-            openalex = fetch_openalex(session, pmid, args.sleep)
-            doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
-            crossref = fetch_crossref(session, doi, args.sleep)
-            combined: Dict[str, str] = {}
-            combined.update(pubmed)
-            combined.update(semsch)
-            combined.update(openalex)
-            combined.update(crossref)
-            # print_results expects a list of records, so wrap the single record
-            print_results([combined])
-            records.append(combined)
-
-    all_keys = set()
-    for rec in records:
-        all_keys.update(rec.keys())
-    fieldnames = sorted(all_keys)
-
-    with open(args.output, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
-
-
-if __name__ == "__main__":
-    main()
