@@ -164,9 +164,8 @@ def run_all(args: argparse.Namespace) -> int:
 
     pmids = [str(p) for p in doc_df["pubmed_id"].dropna().astype(int).tolist()]
     pub_df = fetch_pubmed_records(pmids, args.sleep)
-    pub_df = pub_df.add_prefix("pubmed.")
     merged = doc_df.merge(
-        pub_df, how="left", left_on="pubmed_id", right_on="pubmed.PubMed.PMID"
+        pub_df, how="left", left_on="pubmed_id", right_on="PubMed.PMID"
     )
     try:
         merged.to_csv(args.output_csv, index=False)
