@@ -34,6 +34,8 @@ import requests
 
 from library import chembl_library as cl
 from library import pubmed_library as pl
+from library import semantic_scholar_library as ssl
+from library import openalex_crossref_library as ocl
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +90,10 @@ def fetch_pubmed_records(pmids: list[str], sleep: float) -> pd.DataFrame:
     with requests.Session() as session:
         for pmid in pmids:
             pubmed = pl.fetch_pubmed(session, pmid, sleep)
-            semsch = pl.fetch_semantic_scholar(session, pmid, sleep)
-            openalex = pl.fetch_openalex(session, pmid, sleep)
+            semsch = ssl.fetch_semantic_scholar(session, pmid, sleep)
+            openalex = ocl.fetch_openalex(session, pmid, sleep)
             doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
-            crossref = pl.fetch_crossref(session, doi, sleep)
+            crossref = ocl.fetch_crossref(session, doi, sleep)
             combined: dict[str, str] = {}
             combined.update(pubmed)
             combined.update(semsch)
@@ -104,28 +106,61 @@ def fetch_pubmed_records(pmids: list[str], sleep: float) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def run_pubmed(args: argparse.Namespace) -> None:
-    pmids = pl.read_pmids(args.input_csv)
-    df = fetch_pubmed_records(pmids, args.sleep)
-    df.to_csv(args.output_csv, index=False)
+def run_pubmed(args: argparse.Namespace) -> int:
+    """Execute the ``pubmed`` sub-command."""
+
+    try:
+        pmids = pl.read_pmids(args.input_csv)
+        df = fetch_pubmed_records(pmids, args.sleep)
+        df.to_csv(args.output_csv, index=False)
+        logger.info("Wrote %d rows to %s", len(df), args.output_csv)
+        return 0
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        logger.error("%s", exc)
+        return 1
 
 
-def run_chembl(args: argparse.Namespace) -> None:
-    ids = read_ids(
-        args.input_csv, column=args.column, sep=args.sep, encoding=args.encoding
-    )
+def run_chembl(args: argparse.Namespace) -> int:
+    """Execute the ``chembl`` sub-command."""
+
+    try:
+        ids = read_ids(
+            args.input_csv, column=args.column, sep=args.sep, encoding=args.encoding
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("%s", exc)
+        return 1
+
     df = cl.get_documents(ids, chunk_size=args.chunk_size)
-    df.to_csv(args.output_csv, index=False)
+    try:
+        df.to_csv(args.output_csv, index=False)
+        logger.info("Wrote %d rows to %s", len(df), args.output_csv)
+        return 0
+    except OSError as exc:
+        logger.error("failed to write output CSV: %s", exc)
+        return 1
 
 
-def run_all(args: argparse.Namespace) -> None:
-    ids = read_ids(
-        args.input_csv, column=args.column, sep=args.sep, encoding=args.encoding
-    )
+def run_all(args: argparse.Namespace) -> int:
+    """Run ChEMBL and PubMed pipelines and merge their outputs."""
+
+    try:
+        ids = read_ids(
+            args.input_csv, column=args.column, sep=args.sep, encoding=args.encoding
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("%s", exc)
+        return 1
+
     doc_df = cl.get_documents(ids, chunk_size=args.chunk_size)
     if doc_df.empty or "pubmed_id" not in doc_df:
-        doc_df.to_csv(args.output_csv, index=False)
-        return
+        try:
+            doc_df.to_csv(args.output_csv, index=False)
+            logger.info("Wrote %d rows to %s", len(doc_df), args.output_csv)
+            return 0
+        except OSError as exc:
+            logger.error("failed to write output CSV: %s", exc)
+            return 1
 
     pmids = [str(p) for p in doc_df["pubmed_id"].dropna().astype(int).tolist()]
     pub_df = fetch_pubmed_records(pmids, args.sleep)
@@ -133,7 +168,13 @@ def run_all(args: argparse.Namespace) -> None:
     merged = doc_df.merge(
         pub_df, how="left", left_on="pubmed_id", right_on="pubmed.PubMed.PMID"
     )
-    merged.to_csv(args.output_csv, index=False)
+    try:
+        merged.to_csv(args.output_csv, index=False)
+        logger.info("Wrote %d rows to %s", len(merged), args.output_csv)
+        return 0
+    except OSError as exc:
+        logger.error("failed to write output CSV: %s", exc)
+        return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -181,12 +222,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(argv: Sequence[str] | None = None) -> int:
+    """Command line entry point."""
+
     parser = build_parser()
     args = parser.parse_args(argv)
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
-    args.func(args)
+    return args.func(args)
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover - CLI entry point
+    raise SystemExit(main())

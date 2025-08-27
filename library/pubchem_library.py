@@ -12,8 +12,25 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import requests
+from requests import Session
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 
 logger = logging.getLogger(__name__)
+
+# A single shared session with retry/backoff for all HTTP calls.  PubChem
+# enforces fairly strict rate limits; the retry configuration helps to recover
+# from transient failures such as HTTP 5xx responses.
+_retry = Retry(
+    total=3,
+    backoff_factor=1.0,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+)
+_session: Session = requests.Session()
+_session.mount("http://", HTTPAdapter(max_retries=_retry))
+_session.mount("https://", HTTPAdapter(max_retries=_retry))
 
 
 def url_encode(text: str) -> str:
@@ -35,29 +52,38 @@ def url_encode(text: str) -> str:
 def make_request(url: str, delay: float = 3.0) -> Optional[Dict[str, Any]]:
     """Make an HTTP GET request and return parsed JSON.
 
+    The function sleeps for ``delay`` seconds before issuing the request in
+    order to respect PubChem rate limits.  A shared session configured with
+    retries is used to automatically retry transient failures.
+
     Parameters
     ----------
-    url: str
+    url:
         Endpoint URL to query.
-    delay: float, optional
-        Time in seconds to wait before making the request. Defaults to 3
-        seconds to respect PubChem rate limits.
+    delay:
+        Time in seconds to wait before making the request. Defaults to three
+        seconds.
 
     Returns
     -------
     dict or None
-        Parsed JSON response or ``None`` if the request failed or returned
-        HTTP 404.
+        Parsed JSON response or ``None`` when the request fails, the server
+        returns a non-success status code, or the payload cannot be decoded.
     """
+
     time.sleep(delay)
     try:
-        response = requests.get(url, timeout=10)
+        response = _session.get(url, timeout=10)
         if response.status_code == 404:
             logger.warning("Request returned 404 for url %s", url)
             return None
         response.raise_for_status()
-        return response.json()
-    except requests.RequestException as exc:
+        try:
+            return response.json()
+        except ValueError:
+            logger.warning("Non-JSON response for url %s", url)
+            return None
+    except requests.RequestException as exc:  # pragma: no cover - network
         logger.error("HTTP request failed for url %s: %s", url, exc)
         return None
 
