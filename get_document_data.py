@@ -105,12 +105,28 @@ def fetch_pubmed_records(pmids: list[str], sleep: float) -> pd.DataFrame:
 
 
 def run_pubmed(args: argparse.Namespace) -> None:
+    """Entry point for the ``pubmed`` sub-command.
+
+    Parameters
+    ----------
+    args:
+        Parsed command-line arguments.
+    """
+
     pmids = pl.read_pmids(args.input_csv)
     df = fetch_pubmed_records(pmids, args.sleep)
     df.to_csv(args.output_csv, index=False)
 
 
 def run_chembl(args: argparse.Namespace) -> None:
+    """Entry point for the ``chembl`` sub-command.
+
+    Parameters
+    ----------
+    args:
+        Parsed command-line arguments.
+    """
+
     ids = read_ids(
         args.input_csv, column=args.column, sep=args.sep, encoding=args.encoding
     )
@@ -119,6 +135,14 @@ def run_chembl(args: argparse.Namespace) -> None:
 
 
 def run_all(args: argparse.Namespace) -> None:
+    """Fetch data from ChEMBL and PubMed and merge the results.
+
+    Parameters
+    ----------
+    args:
+        Parsed command-line arguments.
+    """
+
     ids = read_ids(
         args.input_csv, column=args.column, sep=args.sep, encoding=args.encoding
     )
@@ -127,9 +151,22 @@ def run_all(args: argparse.Namespace) -> None:
         doc_df.to_csv(args.output_csv, index=False)
         return
 
-    pmids = [str(p) for p in doc_df["pubmed_id"].dropna().astype(int).tolist()]
+    # Ensure PubMed IDs are numeric and collect non-null IDs for querying
+    doc_df["pubmed_id"] = pd.to_numeric(doc_df["pubmed_id"], errors="coerce").astype(
+        "Int64"
+    )
+    pmids = doc_df["pubmed_id"].dropna().astype(str).tolist()
+
     pub_df = fetch_pubmed_records(pmids, args.sleep)
+    if pub_df.empty or "PubMed.PMID" not in pub_df.columns:
+        doc_df.to_csv(args.output_csv, index=False)
+        return
+
     pub_df = pub_df.add_prefix("pubmed.")
+    pub_df["pubmed.PubMed.PMID"] = pd.to_numeric(
+        pub_df["pubmed.PubMed.PMID"], errors="coerce"
+    ).astype("Int64")
+
     merged = doc_df.merge(
         pub_df, how="left", left_on="pubmed_id", right_on="pubmed.PubMed.PMID"
     )
