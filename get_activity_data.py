@@ -1,4 +1,4 @@
-"""Command line interface for retrieving ChEMBL assay data."""
+"""Command line interface for retrieving ChEMBL activity data."""
 
 from __future__ import annotations
 
@@ -8,10 +8,6 @@ import logging
 from pathlib import Path
 from typing import Sequence
 
-
-import pandas as pd
-
-
 from library import chembl_library as cl
 
 logger = logging.getLogger(__name__)
@@ -19,19 +15,19 @@ logger = logging.getLogger(__name__)
 
 def read_ids(
     path: str | Path,
-    column: str = "assay_chembl_id",
+    column: str = "activity_id",
     sep: str = ",",
     encoding: str = "utf8",
 ) -> list[str]:
-    """Read ChEMBL assay identifiers from a CSV file.
+    """Read ChEMBL activity identifiers from a CSV file.
 
     Parameters
     ----------
     path : str or Path
         Path to the CSV file.
     column : str, optional
-        Name of the column containing assay identifiers. Defaults to
-        ``"assay_chembl_id"``.
+        Name of the column containing activity identifiers. Defaults to
+        ``"activity_id"``.
     sep : str, optional
         Field delimiter, by default a comma.
     encoding : str, optional
@@ -66,7 +62,7 @@ def read_ids(
 
 
 def run_chembl(args: argparse.Namespace) -> int:
-    """Execute assay retrieval from the ChEMBL API.
+    """Execute activity retrieval from the ChEMBL API.
 
     Parameters
     ----------
@@ -89,7 +85,7 @@ def run_chembl(args: argparse.Namespace) -> int:
         logger.error("%s", exc)
         return 1
 
-    df = cl.get_assays(ids, chunk_size=args.chunk_size)
+    df = cl.get_activities(ids, chunk_size=args.chunk_size)
     try:
         df.to_csv(args.output_csv, index=False, sep=args.sep, encoding=args.encoding)
         logger.info("Wrote %d rows to %s", len(df), args.output_csv)
@@ -101,15 +97,15 @@ def run_chembl(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     """Create the command-line argument parser."""
-    parser = argparse.ArgumentParser(description="ChEMBL assay data utilities")
+    parser = argparse.ArgumentParser(description="ChEMBL activity data utilities")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     parser.add_argument(
-        "input_csv", type=Path, help="CSV file containing assay identifiers"
+        "input_csv", type=Path, help="CSV file containing activity identifiers"
     )
     parser.add_argument("output_csv", type=Path, help="Destination CSV file")
     parser.add_argument(
         "--column",
-        default="assay_chembl_id",
+        default="activity_id",
         help="Column name in the input CSV containing identifiers",
     )
     parser.add_argument("--sep", default=",", help="CSV delimiter")
@@ -137,3 +133,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point
     raise SystemExit(main())
+

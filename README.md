@@ -7,7 +7,9 @@ Utilities for downloading and integrating target information from
 It also provides helpers for collecting publication metadata from
 PubMed, Semantic Scholar, OpenAlex and CrossRef.
 
-Three command line tools are available:
+
+Five command line tools are available:
+
 
 `get_target_data.py`
     Query biological data sources individually or run the combined
@@ -18,6 +20,14 @@ Three command line tools are available:
 
 `get_assay_data.py`
     Fetch assay information from the ChEMBL API for a list of assay IDs.
+
+
+`get_activity_data.py`
+    Fetch activity information from the ChEMBL API for a list of activity IDs.
+
+`get_testitem_data.py`
+    Fetch compound information from the ChEMBL API for a list of molecule IDs.
+
 
 ## Installation
 
@@ -69,6 +79,26 @@ Retrieve assay information from the ChEMBL API for identifiers listed in
 python get_assay_data.py assays.csv assay_results.csv
 ```
 
+
+### Activity metadata
+
+Retrieve activity information from the ChEMBL API for identifiers listed in
+`activities.csv`:
+
+```bash
+python get_activity_data.py activities.csv activity_results.csv
+```
+
+### Test item metadata
+
+Retrieve compound information from the ChEMBL API for identifiers listed in
+`molecules.csv`:
+
+```bash
+python get_testitem_data.py molecules.csv compound_results.csv
+```
+
+
 ### Document metadata
 
 Fetch PubMed, Semantic Scholar, OpenAlex and CrossRef records for PMIDs
@@ -93,6 +123,8 @@ python get_document_data.py all docs.csv merged_docs.csv
 
 get_target(chembl_target_id) / get_targets(ids, chunk_size=50) - fetch single/multiple targets, normalize fields (name, ChEMBL ID, HGNC, EC, etc.), robust to network errors.
 get_assay(chembl_assay_id) / get_assays(ids, chunk_size=50) - load and normalize assay records.
+get_activity(activity_id) / get_activities(ids, chunk_size=50) - load and normalize activity records.
+get_testitem(ids, chunk_size=50) - load and normalize compound records.
 
 get_document(chembl_document_id) / get_documents(ids, chunk_size=50) - publication metadata from ChEMBL.
 extend_target(df, chembl_column="task_chembl_id", chunk_size=50) - join an input table with extended ChEMBL target information.
