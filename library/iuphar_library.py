@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 EXPECTED_TARGET_COLUMNS: tuple[str, ...] = (
-    "target_id",
-    "swissprot",
+    "chembl_id",
+    "uniprot_id",
     "hgnc_name",
     "hgnc_id",
     "gene_name",
@@ -210,7 +210,7 @@ class IUPHARData:
     def target_id_by_uniprot(self, uniprot_id: str) -> str:
         """Return the first target ID mapped to ``uniprot_id``."""
 
-        ids = self._select_target_ids(self.target_df["swissprot"].eq(uniprot_id))
+        ids = self._select_target_ids(self.target_df["uniprot_id"].eq(uniprot_id))
         return ids[0] if ids else ""
 
     def target_id_by_hgnc_name(self, hgnc_name: str) -> str:
