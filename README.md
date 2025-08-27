@@ -7,7 +7,9 @@ Utilities for downloading and integrating target information from
 It also provides helpers for collecting publication metadata from
 PubMed, Semantic Scholar, OpenAlex and CrossRef.
 
+
 Five command line tools are available:
+
 
 `get_target_data.py`
     Query biological data sources individually or run the combined
@@ -19,11 +21,13 @@ Five command line tools are available:
 `get_assay_data.py`
     Fetch assay information from the ChEMBL API for a list of assay IDs.
 
+
 `get_activity_data.py`
     Fetch activity information from the ChEMBL API for a list of activity IDs.
 
 `get_testitem_data.py`
     Fetch compound information from the ChEMBL API for a list of molecule IDs.
+
 
 ## Installation
 
@@ -75,6 +79,7 @@ Retrieve assay information from the ChEMBL API for identifiers listed in
 python get_assay_data.py assays.csv assay_results.csv
 ```
 
+
 ### Activity metadata
 
 Retrieve activity information from the ChEMBL API for identifiers listed in
@@ -92,6 +97,7 @@ Retrieve compound information from the ChEMBL API for identifiers listed in
 ```bash
 python get_testitem_data.py molecules.csv compound_results.csv
 ```
+
 
 ### Document metadata
 

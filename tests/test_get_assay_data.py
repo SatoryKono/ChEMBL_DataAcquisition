@@ -4,6 +4,9 @@ from pathlib import Path
 
 import pandas as pd
 
+import pytest
+
+
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import get_assay_data as gad
