@@ -235,7 +235,7 @@ def get_target(chembl_target_id: str) -> dict[str, Any]:
     return _parse_target_record(data)
 
 
-def get_targets(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
+def get_targets(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
     """Fetch target records for ``ids``.
 
     Parameters
@@ -361,7 +361,7 @@ def get_assay(chembl_assay_id: str) -> pd.DataFrame:
     return df
 
 
-def get_assays(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
+def get_assays(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
     """Fetch assay records for ``ids``.
 
     Parameters
@@ -471,7 +471,7 @@ def get_document(chembl_document_id: str) -> pd.DataFrame:
     return df.reindex(columns=DOCUMENT_COLUMNS)
 
 
-def get_documents(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
+def get_documents(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
     """Fetch document records for ``ids``.
 
     Parameters
@@ -521,7 +521,7 @@ def get_documents(ids: Iterable[str], chunk_size: int = 50) -> pd.DataFrame:
 
 
 def extend_target(
-    df: pd.DataFrame, chembl_column: str = "task_chembl_id", chunk_size: int = 50
+    df: pd.DataFrame, chembl_column: str = "task_chembl_id", chunk_size: int = 5
 ) -> pd.DataFrame:
     """Augment a DataFrame with target information.
 
