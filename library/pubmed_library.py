@@ -1,18 +1,15 @@
-"""Utilities for retrieving publication metadata from external services.
+"""Utilities for retrieving publication metadata from the PubMed API.
 
-The helpers in this module abstract the HTTP communication with a number of
-public APIs such as PubMed, Semantic Scholar, OpenAlex and CrossRef.  They are
-intended to be reused by command line tools and other libraries.
-
-Network failures or malformed responses yield dictionaries populated with
-empty strings and an ``Error`` field describing the failure.  Callers should
-inspect this field when post-processing the results.
+The helpers in this module focus solely on PubMed/Entrez endpoints and provide
+building blocks for command line tools and other libraries.  Network failures
+or malformed responses yield dictionaries populated with empty strings and an
+``Error`` field describing the failure.  Callers should inspect this field when
+post-processing the results.
 """
 
 from __future__ import annotations
 
 import csv
-import json
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
@@ -20,7 +17,6 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import logging
 import requests
 from xml.etree import ElementTree as ET
-from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -292,110 +288,3 @@ def fetch_pubmed(session: requests.Session, pmid: str, sleep: float) -> Dict[str
     result.update(parse_pubmed_article(article))
     return result
 
-
-def fetch_semantic_scholar(session: requests.Session, pmid: str, sleep: float) -> Dict[str, str]:
-    fields = "publicationTypes,externalIds,paperId,venue"
-    headers = {"Accept": "application/json"}
-    url = f"https://api.semanticscholar.org/graph/v1/paper/PMID:{pmid}"
-    data, error = _do_request(
-        session,
-        url,
-        sleep * 5,
-        headers=headers,
-        params={"fields": fields},
-    )
-    if error or not isinstance(data, dict):
-        return {
-            "scholar.PMID": pmid,
-            "scholar.Venue": "",
-            "scholar.PublicationTypes": "",
-            "scholar.SemanticScholarId": "",
-            "scholar.ExternalIds": "",
-            "scholar.DOI": "",
-            "scholar.Error": error or "Invalid response",
-        }
-    pubtypes = data.get("publicationTypes") or []
-    external_ids = data.get("externalIds") or {}
-    doi = external_ids.get("DOI") or ""
-    return {
-        "scholar.PMID": pmid,
-        "scholar.Venue": data.get("venue", ""),
-        "scholar.PublicationTypes": "; ".join(pubtypes) if pubtypes else "",
-        "scholar.SemanticScholarId": data.get("paperId", ""),
-        "scholar.ExternalIds": json.dumps(external_ids, ensure_ascii=False),
-        "scholar.DOI": doi,
-        "scholar.Error": "",
-    }
-
-
-def fetch_openalex(session: requests.Session, pmid: str, sleep: float) -> Dict[str, str]:
-    url = f"https://api.openalex.org/works/pmid:{pmid}"
-    data, error = _do_request(session, url, sleep)
-    if error or not isinstance(data, dict):
-        return {
-            "OpenAlex.PublicationTypes": "",
-            "OpenAlex.TypeCrossref": "",
-            "OpenAlex.Genre": "",
-            "OpenAlex.Id": "",
-            "OpenAlex.Venue": "",
-            "OpenAlex.MeshDescriptors": "",
-            "OpenAlex.MeshQualifiers": "",
-            "OpenAlex.Error": error or "Invalid response",
-        }
-    mesh_entries = data.get("mesh") or []
-    descriptors: List[str] = []
-    qualifiers: List[str] = []
-    for entry in mesh_entries:
-        d = entry.get("descriptor_name")
-        if d:
-            descriptors.append(d)
-        for q in entry.get("qualifiers") or []:
-            qn = q.get("qualifier_name")
-            if qn:
-                qualifiers.append(qn)
-    return {
-        "OpenAlex.PublicationTypes": data.get("type", ""),
-        "OpenAlex.TypeCrossref": data.get("type_crossref", ""),
-        "OpenAlex.Genre": data.get("genre", ""),
-        "OpenAlex.Id": data.get("id", ""),
-        "OpenAlex.Venue": data.get("host_venue", {}).get("display_name", ""),
-        "OpenAlex.MeshDescriptors": combine(descriptors),
-        "OpenAlex.MeshQualifiers": combine(qualifiers),
-        "OpenAlex.Error": "",
-    }
-
-
-def fetch_crossref(session: requests.Session, doi: str, sleep: float) -> Dict[str, str]:
-    if not doi:
-        return {
-            "crossref.Type": "",
-            "crossref.Subtype": "",
-            "crossref.Title": "",
-            "crossref.Subtitle": "",
-            "crossref.Subject": "",
-            "crossref.Error": "Missing DOI",
-        }
-
-    url = f"https://api.crossref.org/works/{quote(doi, safe='')}"
-    data, error = _do_request(session, url, sleep)
-    if error or not isinstance(data, dict):
-        return {
-            "crossref.Type": "",
-            "crossref.Subtype": "",
-            "crossref.Title": "",
-            "crossref.Subtitle": "",
-            "crossref.Subject": "",
-            "crossref.Error": error or "Invalid response",
-        }
-    message = data.get("message", {})
-    title = message.get("title") or [""]
-    subtitle = message.get("subtitle") or [""]
-    subject = "; ".join(message.get("subject") or [])
-    return {
-        "crossref.Type": message.get("type", ""),
-        "crossref.Subtype": message.get("subtype", ""),
-        "crossref.Title": title[0] if title else "",
-        "crossref.Subtitle": subtitle[0] if subtitle else "",
-        "crossref.Subject": subject,
-        "crossref.Error": "",
-    }

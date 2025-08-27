@@ -34,6 +34,8 @@ import requests
 
 from library import chembl_library as cl
 from library import pubmed_library as pl
+from library import semantic_scholar_library as ss
+from library import openalex_crossref_library as ocl
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +90,10 @@ def fetch_pubmed_records(pmids: list[str], sleep: float) -> pd.DataFrame:
     with requests.Session() as session:
         for pmid in pmids:
             pubmed = pl.fetch_pubmed(session, pmid, sleep)
-            semsch = pl.fetch_semantic_scholar(session, pmid, sleep)
-            openalex = pl.fetch_openalex(session, pmid, sleep)
+            semsch = ss.fetch_semantic_scholar(session, pmid, sleep)
+            openalex = ocl.fetch_openalex(session, pmid, sleep)
             doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
-            crossref = pl.fetch_crossref(session, doi, sleep)
+            crossref = ocl.fetch_crossref(session, doi, sleep)
             combined: dict[str, str] = {}
             combined.update(pubmed)
             combined.update(semsch)
