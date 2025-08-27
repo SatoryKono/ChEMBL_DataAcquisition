@@ -85,7 +85,10 @@ def read_ids(
 
 
 def fetch_pubmed_records(
-    pmids: list[str], sleep: float, max_workers: int = 1
+    pmids: list[str],
+    sleep: float,
+    max_workers: int = 1,
+    batch_size: int = 200,
 ) -> pd.DataFrame:
     """Retrieve metadata for a list of PubMed identifiers.
 
@@ -95,6 +98,10 @@ def fetch_pubmed_records(
         Identifiers to query.
     sleep:
         Seconds to pause between API requests.
+    max_workers:
+        Maximum number of concurrent threads.
+    batch_size:
+        Maximum number of PMIDs per PubMed request.
 
     Returns
     -------
@@ -102,39 +109,46 @@ def fetch_pubmed_records(
         Combined metadata from the different sources.
     """
 
-    def _fetch_single(pmid: str) -> dict[str, str]:
-        """Fetch metadata for a single PMID.
+    def _fetch_batch(batch: list[str]) -> list[dict[str, str]]:
+        """Fetch metadata for a batch of PMIDs.
 
-        Each worker opens its own :class:`requests.Session` to avoid sharing a
-        session across threads. Exceptions are caught and logged so that a
-        failure for one PMID does not abort the whole batch.
+        Each worker opens its own :class:`requests.Session` and retrieves PubMed
+        entries for all PMIDs in ``batch`` using a single request. Metadata from
+        Semantic Scholar, OpenAlex and CrossRef are then fetched individually
+        for each PMID. Exceptions are logged so a failure in one batch does not
+        abort the whole process.
         """
 
         try:
             with requests.Session() as session:
-                pubmed = pl.fetch_pubmed(session, pmid, sleep)
-                semsch = ssl.fetch_semantic_scholar(session, pmid, sleep)
-                openalex = ocl.fetch_openalex(session, pmid, sleep)
-                doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
-                crossref = ocl.fetch_crossref(session, doi, sleep)
-                combined: dict[str, str] = {}
-                combined.update(pubmed)
-                combined.update(semsch)
-                combined.update(openalex)
-                combined.update(crossref)
-                return combined
+                pubmed_list = pl.fetch_pubmed_batch(session, batch, sleep)
+                combined_records: list[dict[str, str]] = []
+                for pubmed in pubmed_list:
+                    pmid = pubmed.get("PubMed.PMID", "")
+                    semsch = ssl.fetch_semantic_scholar(session, pmid, sleep)
+                    openalex = ocl.fetch_openalex(session, pmid, sleep)
+                    doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
+                    crossref = ocl.fetch_crossref(session, doi, sleep)
+                    combined: dict[str, str] = {}
+                    combined.update(pubmed)
+                    combined.update(semsch)
+                    combined.update(openalex)
+                    combined.update(crossref)
+                    combined_records.append(combined)
+                return combined_records
         except Exception as exc:  # pragma: no cover - network errors
-            logger.warning("failed to fetch PMID %s: %s", pmid, exc)
-            return {}
+            logger.warning("failed to fetch PMIDs %s: %s", batch, exc)
+            return [{} for _ in batch]
 
     if not pmids:
         return pd.DataFrame()
 
     records: list[dict[str, str]] = []
+    batches = [pmids[i : i + batch_size] for i in range(0, len(pmids), batch_size)]
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        future_to_id = {ex.submit(_fetch_single, pid): pid for pid in pmids}
-        for future in as_completed(future_to_id):
-            records.append(future.result())
+        futures = [ex.submit(_fetch_batch, batch) for batch in batches]
+        for future in as_completed(futures):
+            records.extend(future.result())
 
     if not records:
         return pd.DataFrame()
@@ -146,7 +160,7 @@ def run_pubmed(args: argparse.Namespace) -> int:
 
     try:
         pmids = pl.read_pmids(args.input_csv)
-        df = fetch_pubmed_records(pmids, args.sleep, args.workers)
+        df = fetch_pubmed_records(pmids, args.sleep, args.workers, args.batch_size)
         df.to_csv(args.output_csv, index=False)
         logger.info("Wrote %d rows to %s", len(df), args.output_csv)
         return 0
@@ -200,7 +214,7 @@ def run_all(args: argparse.Namespace) -> int:
     # Normalise PubMed identifiers to strings to avoid dtype mismatches
     pubmed_ids = pd.to_numeric(doc_df["pubmed_id"], errors="coerce").astype("Int64")
     pmids = pubmed_ids.dropna().astype(str).tolist()
-    pub_df = fetch_pubmed_records(pmids, args.sleep, args.workers)
+    pub_df = fetch_pubmed_records(pmids, args.sleep, args.workers, args.batch_size)
     doc_df["pubmed_id"] = pubmed_ids.astype(str)
     if not pub_df.empty and "PubMed.PMID" in pub_df.columns:
         pub_df["PubMed.PMID"] = (
@@ -235,6 +249,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pubmed.add_argument(
         "--workers", type=int, default=1, help="Number of concurrent requests"
+    )
+    pubmed.add_argument(
+        "--batch-size",
+        type=int,
+        default=200,
+        help="Maximum PMIDs per PubMed request",
     )
     pubmed.set_defaults(func=run_pubmed)
 
@@ -274,6 +294,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     all_cmd.add_argument(
         "--workers", type=int, default=1, help="Number of concurrent PubMed requests"
+    )
+    all_cmd.add_argument(
+        "--batch-size",
+        type=int,
+        default=50,
+        help="Maximum PMIDs per PubMed request",
     )
     all_cmd.set_defaults(func=run_all)
 
