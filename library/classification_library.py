@@ -132,6 +132,7 @@ def get_table(source: pd.DataFrame) -> pd.DataFrame:
         "component_description",
         "names_x",
         "chembl_alternative_name",
+        "pref_name" ,
     ]
     validate_columns(source, required)
 
@@ -178,6 +179,7 @@ def get_table(source: pd.DataFrame) -> pd.DataFrame:
         lambda r: split_and_clean(
             [
                 r.get("gene"),
+                r.get("pref_name"),
                 r.get("component_description"),
                 r.get("names_x"),
                 r.get("chembl_alternative_name"),

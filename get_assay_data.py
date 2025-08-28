@@ -113,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sep", default=",", help="CSV delimiter")
     parser.add_argument("--encoding", default="utf8", help="File encoding")
     parser.add_argument(
-        "--chunk-size", type=int, default=50, help="Maximum number of IDs per request"
+        "--chunk-size", type=int, default=10, help="Maximum number of IDs per request"
     )
     parser.set_defaults(func=run_chembl)
     return parser
