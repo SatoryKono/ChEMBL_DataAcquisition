@@ -392,32 +392,41 @@ def run_all(args: argparse.Namespace) -> int:
         finally:
             tmp_path.unlink(missing_ok=True)
 
-        # Run IUPHAR mapping using UniProt output
+        # Load UniProt output
+        uniprot_df = pd.read_csv(
+            uniprot_out, sep=args.sep, encoding=args.encoding, dtype=str
+        )
+
+        # Prepare combined input for IUPHAR containing ChEMBL and UniProt data
+        combined_df = chembl_df.merge(uniprot_df, on="uniprot_id", how="left")
+        with NamedTemporaryFile("w", delete=False, encoding=args.encoding, newline="") as tmp:
+            combined_df.to_csv(tmp, index=False, sep=args.sep, encoding=args.encoding)
+            iuphar_input = Path(tmp.name)
+
+        # Run IUPHAR mapping using combined data
         iuphar_args = argparse.Namespace(
-            input_csv=uniprot_out,
+            input_csv=iuphar_input,
             output_csv=iuphar_out,
             target_csv=args.target_csv,
             family_csv=args.family_csv,
             sep=args.sep,
             encoding=args.encoding,
         )
-        if run_iuphar(iuphar_args) != 0:
-            return 1
+        try:
+            if run_iuphar(iuphar_args) != 0:
+                return 1
+        finally:
+            iuphar_input.unlink(missing_ok=True)
 
         # Merge results using pandas
-        uniprot_df = pd.read_csv(
-            uniprot_out, sep=args.sep, encoding=args.encoding, dtype=str
-        )
         iuphar_df = pd.read_csv(
             iuphar_out, sep=args.sep, encoding=args.encoding, dtype=str
         )
-        classification_cols = [
-            c for c in iuphar_df.columns if c not in {"uniprot_id", "hgnc_name"}
-        ]
+        existing_cols = set(chembl_df.columns) | set(uniprot_df.columns)
+        classification_cols = [c for c in iuphar_df.columns if c not in existing_cols]
         iuphar_df = iuphar_df[["uniprot_id", *classification_cols]]
 
-        merged = chembl_df.merge(uniprot_df, on="uniprot_id", how="left")
-        merged = merged.merge(iuphar_df, on="uniprot_id", how="left")
+        merged = combined_df.merge(iuphar_df, on="uniprot_id", how="left")
         merged.to_csv(
             args.output_csv, index=False, sep=args.sep, encoding=args.encoding
         )
