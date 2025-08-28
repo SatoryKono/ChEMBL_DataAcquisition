@@ -239,7 +239,12 @@ class IUPHARData:
         return "|".join(ids) if ids else ""
 
     def target_id_by_name(self, target_name: str) -> str:
-        """Resolve target IDs by searching the synonym field.
+        """Resolve target IDs by matching *target_name*.
+
+        The search checks the ``target_name`` column for case-insensitive
+        equality and the ``synonyms`` column for case-insensitive substring
+        matches. This mirrors the behaviour of the Power Query implementation
+        and allows for flexible name-based lookups.
 
         Parameters
         ----------
@@ -249,17 +254,20 @@ class IUPHARData:
         Returns
         -------
         str
-            Pipe-delimited target identifiers whose ``synonyms`` column
-            contains ``target_name``. The search is case-insensitive and treats
-            ``target_name`` as a literal substring rather than a regular
-            expression, avoiding errors with special characters.
+            Pipe-delimited target identifiers whose ``target_name`` or
+            ``synonyms`` fields match ``target_name``.
         """
 
         if not target_name:
             return ""
-        mask = self.target_df["synonyms"].fillna("").str.contains(
+        syn_mask = self.target_df["synonyms"].fillna("").str.contains(
             target_name, case=False, na=False, regex=False
         )
+        name_mask = (
+            self.target_df["target_name"].fillna("").str.casefold()
+            == target_name.casefold()
+        )
+        mask = syn_mask | name_mask
         ids = self._select_target_ids(mask)
         return "|".join(ids) if ids else ""
 
@@ -325,12 +333,14 @@ class IUPHARData:
         includes a ``GuidetoPHARMACOLOGY`` column, non-empty values are taken
         as the target identifier. For rows lacking this cross-reference, the
         function attempts to resolve the target via the UniProt accession. If
-        that fails, optional columns ``hgnc_name``, ``hgnc_id``, ``gene_name``
-        and ``synonyms`` (pipe-delimited) are consulted in that order.
+        that fails, optional columns ``hgnc_name``, ``hgnc_id``, ``gene_name``,
+        ``pref_name`` and ``component_description`` are consulted as target
+        names, followed by ``synonyms`` (pipe-delimited).
         Successful lookups are translated to a full IUPHAR classification. The
         resulting table includes the target ID, class, subclass, and family
         chain in addition to the full ID and name paths. If no target can be
-        resolved, an optional ``ec_number`` column is used to derive
+        resolved, optional ``ec_number``, ``reaction_ec_numbers_x`` and
+        ``reaction_ec_numbers_y`` columns are used to derive
         ``IUPHAR_type``, ``IUPHAR_class`` and ``IUPHAR_subclass``.
 
         Parameters
@@ -390,6 +400,18 @@ class IUPHARData:
                 self.target_id_by_gene
             )
 
+        if "pref_name" in df.columns:
+            mask = df["target_id"].eq("")
+            df.loc[mask, "target_id"] = df.loc[mask, "pref_name"].apply(
+                self.target_id_by_name
+            )
+
+        if "component_description" in df.columns:
+            mask = df["target_id"].eq("")
+            df.loc[mask, "target_id"] = df.loc[mask, "component_description"].apply(
+                self.target_id_by_name
+            )
+
         if "synonyms" in df.columns:
             mask = df["target_id"].eq("")
             df.loc[mask, "target_id"] = df.loc[mask, "synonyms"].apply(
@@ -402,7 +424,12 @@ class IUPHARData:
             if tid:
                 record = classifier.by_target_id(tid)
             else:
-                ec = row.get("ec_number", "")
+                ec_candidates = [
+                    row.get("ec_number", ""),
+                    row.get("reaction_ec_numbers_x", ""),
+                    row.get("reaction_ec_numbers_y", ""),
+                ]
+                ec = next((e for e in ec_candidates if e), "")
                 if not ec:
                     return pd.Series(
                         {
