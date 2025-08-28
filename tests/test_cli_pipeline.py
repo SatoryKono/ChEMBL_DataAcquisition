@@ -106,3 +106,8 @@ def test_run_all(monkeypatch, tmp_path: Path) -> None:
     assert df.loc[0, "uniprot_id"] == "Q99558"
     assert df.loc[0, "target_id"] == "2074"
     assert df.loc[0, "IUPHAR_family_id"] == "0624"
+    # Intermediate IUPHAR input should contain both ChEMBL and UniProt data
+    iuphar_csv = output_csv.with_name(output_csv.stem + "_iuphar.csv")
+    iuphar_df = pd.read_csv(iuphar_csv, dtype=str)
+    assert iuphar_df.loc[0, "gene"] == "MAP3K14"
+    assert iuphar_df.loc[0, "names"] != ""
