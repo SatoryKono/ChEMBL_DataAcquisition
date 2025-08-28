@@ -63,6 +63,10 @@ API_URL = "https://rest.uniprot.org/uniprotkb/{id}.json"
 __all__ = [
     "fetch_uniprot",
     "extract_names",
+    "extract_uniprotkb_id",
+    "extract_secondary_accessions",
+    "extract_recommended_name",
+    "extract_gene_name",
     "extract_keywords",
     "extract_isoform",
     "extract_crossrefs",
