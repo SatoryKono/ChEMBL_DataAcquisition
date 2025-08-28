@@ -87,7 +87,7 @@ def run_chembl(args: argparse.Namespace) -> int:
         logger.error("%s", exc)
         return 1
 
-    df = cl.get_assays(ids, chunk_size=args.chunk_size)
+    df = cl.get_assays_all(ids, chunk_size=args.chunk_size)
     try:
         df.to_csv(args.output_csv, index=False, sep=args.sep, encoding=args.encoding)
         logger.info("Wrote %d rows to %s", len(df), args.output_csv)
@@ -113,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sep", default=",", help="CSV delimiter")
     parser.add_argument("--encoding", default="utf8", help="File encoding")
     parser.add_argument(
-        "--chunk-size", type=int, default=5, help="Maximum number of IDs per request"
+        "--chunk-size", type=int, default=50, help="Maximum number of IDs per request"
     )
     parser.set_defaults(func=run_chembl)
     return parser

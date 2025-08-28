@@ -289,7 +289,7 @@ def get_targets(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
 # Assay utilities
 # ----------------------------
 
-ASSAY_URL = "https://www.ebi.ac.uk/chembl/api/data/assay/{id}?format=json&variant_sequence__isnull=false"
+ASSAY_URL = "https://www.ebi.ac.uk/chembl/api/data/assay/{id}?format=json"
 
 ASSAY_COLUMNS = [
     "aidx",
@@ -359,7 +359,60 @@ def get_assay(chembl_assay_id: str) -> pd.DataFrame:
     return df
 
 
-def get_assays(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
+def get_assays_all(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
+    """Fetch assay records for ``ids``.
+
+    Parameters
+    ----------
+    ids:
+        Assay identifiers to retrieve.
+    chunk_size:
+        Maximum number of IDs per HTTP request.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Combined assay records.
+    """
+    valid = [i for i in ids if i not in {"", "#N/A"}]
+    if not valid:
+        return pd.DataFrame(columns=ASSAY_COLUMNS)
+
+    records: list[pd.DataFrame] = []
+    for chunk in _chunked(valid, chunk_size):
+        url = (
+            "https://www.ebi.ac.uk/chembl/api/data/assay.json?format=json&assay_chembl_id__in="
+            + ",".join(chunk)
+        )
+        try:
+            response = _session.get(url, timeout=1000)
+            response.raise_for_status()
+        except requests.RequestException as exc:  # pragma: no cover - network
+            logger.warning("Bulk assay request failed for %s: %s", chunk, exc)
+            continue
+
+        try:
+            data = response.json()
+        except ValueError as exc:  # pragma: no cover - malformed JSON
+            logger.warning("Failed to decode JSON for assays %s: %s", chunk, exc)
+            continue
+
+        items = data.get("assays") or data.get("assay") or []
+        if items:
+            # Normalise JSON then drop columns consisting solely of NaN values
+            df_chunk = pd.json_normalize(items).dropna(axis="columns", how="all")
+            if not df_chunk.empty:
+                records.append(df_chunk)
+
+    # If every request failed or returned only empty records, yield an empty frame
+
+    if not records:
+        return pd.DataFrame(columns=ASSAY_COLUMNS)
+
+    df = pd.concat(records, ignore_index=True)
+    return df.reindex(columns=ASSAY_COLUMNS)
+
+def get_assays_notNull(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
     """Fetch assay records for ``ids``.
 
     Parameters
@@ -385,7 +438,7 @@ def get_assays(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
             + ",".join(chunk)
         )
         try:
-            response = _session.get(url, timeout=30)
+            response = _session.get(url, timeout=1000)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - network
             logger.warning("Bulk assay request failed for %s: %s", chunk, exc)
@@ -399,18 +452,18 @@ def get_assays(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
 
         items = data.get("assays") or data.get("assay") or []
         if items:
-            records.append(pd.json_normalize(items))
+            # Normalise JSON then drop columns consisting solely of NaN values
+            df_chunk = pd.json_normalize(items).dropna(axis="columns", how="all")
+            if not df_chunk.empty:
+                records.append(df_chunk)
 
-    # Filter out empty or all-NA DataFrames to retain pandas concat behavior
-    records = [r for r in records if not r.dropna(how="all").empty]
+    # If every request failed or returned only empty records, yield an empty frame
 
     if not records:
         return pd.DataFrame(columns=ASSAY_COLUMNS)
 
     df = pd.concat(records, ignore_index=True)
     return df.reindex(columns=ASSAY_COLUMNS)
-
-
 # ----------------------------
 # Activity utilities
 # ----------------------------
