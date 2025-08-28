@@ -401,6 +401,9 @@ def get_assays(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
         if items:
             records.append(pd.json_normalize(items))
 
+    # Filter out empty or all-NA DataFrames to retain pandas concat behavior
+    records = [r for r in records if not r.dropna(how="all").empty]
+
     if not records:
         return pd.DataFrame(columns=ASSAY_COLUMNS)
 
