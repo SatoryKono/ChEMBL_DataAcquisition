@@ -232,6 +232,142 @@ def extract_organism(data: Any) -> Dict[str, str]:
         break
     return result
 
+def extract_uniprotkb_id(data: Any) -> str | None:
+    """Return the ``uniProtkbId`` for the first entry in ``data``.
+
+    Args:
+        data: A UniProt JSON structure, list of entries, or search results
+            containing UniProt entries.
+
+    Returns:
+        The ``uniProtkbId`` string when present, otherwise ``None``.
+    """
+
+    if isinstance(data, dict) and "results" in data:
+        entries = data["results"]
+    elif isinstance(data, list):
+        entries = data
+    else:
+        entries = [data]
+    for entry in entries:
+        if isinstance(entry, dict):
+            value = entry.get("uniProtkbId")
+            if isinstance(value, str):
+                return value
+            break
+    return None
+
+
+def extract_secondary_accessions(data: Any) -> List[str]:
+    """Return secondary accession IDs from ``data``.
+
+    Args:
+        data: A UniProt JSON structure, list of entries, or search results
+            containing UniProt entries.
+
+    Returns:
+        A sorted list of secondary accession identifiers. An empty list is
+        returned when no secondary accessions are present.
+    """
+
+    if isinstance(data, dict) and "results" in data:
+        entries = data["results"]
+    elif isinstance(data, list):
+        entries = data
+    else:
+        entries = [data]
+    for entry in entries:
+        if isinstance(entry, dict):
+            secs = entry.get("secondaryAccessions") or []
+            if isinstance(secs, list):
+                return sorted([s for s in secs if isinstance(s, str)])
+            break
+    return []
+
+
+def extract_recommended_name(data: Any) -> str | None:
+    """Return the recommended protein name from ``data``.
+
+    The recommended name is taken from
+    ``proteinDescription.recommendedName.fullName.value`` when available. If
+    that field is missing, the first short name is used instead.
+
+    Args:
+        data: A UniProt JSON structure, list of entries, or search results
+            containing UniProt entries.
+
+    Returns:
+        The recommended name string, or ``None`` when unavailable.
+    """
+
+    if isinstance(data, dict) and "results" in data:
+        entries = data["results"]
+    elif isinstance(data, list):
+        entries = data
+    else:
+        entries = [data]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        desc = entry.get("proteinDescription", {})
+        if not isinstance(desc, dict):
+            break
+        rec = desc.get("recommendedName")
+        if not isinstance(rec, dict):
+            break
+        full = rec.get("fullName")
+        if isinstance(full, dict):
+            value = full.get("value")
+            if isinstance(value, str):
+                return value
+        shorts = rec.get("shortNames") or rec.get("shortName")
+        if isinstance(shorts, list):
+            for item in shorts:
+                if isinstance(item, dict):
+                    value = item.get("value")
+                    if isinstance(value, str):
+                        return value
+        elif isinstance(shorts, dict):
+            value = shorts.get("value")
+            if isinstance(value, str):
+                return value
+        break
+    return None
+
+
+def extract_gene_name(data: Any) -> str | None:
+    """Return the primary gene name from ``data``.
+
+    Args:
+        data: A UniProt JSON structure, list of entries, or search results
+            containing UniProt entries.
+
+    Returns:
+        The primary gene name string, or ``None`` when unavailable.
+    """
+
+    if isinstance(data, dict) and "results" in data:
+        entries = data["results"]
+    elif isinstance(data, list):
+        entries = data
+    else:
+        entries = [data]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        genes = entry.get("genes", [])
+        if not isinstance(genes, list):
+            break
+        for gene in genes:
+            if not isinstance(gene, dict):
+                continue
+            gname = gene.get("geneName")
+            if isinstance(gname, dict):
+                value = gname.get("value")
+                if isinstance(value, str):
+                    return value
+        break
+    return None
 
 def _collect_ec_numbers(name_obj: Dict[str, Any]) -> Iterable[str]:
     """Yield EC numbers from a UniProt name object."""
@@ -618,8 +754,7 @@ def iter_ids(csv_path: str, sep: str = ",", encoding: str = "utf-8") -> Iterable
     except csv.Error as exc:
         raise ValueError(f"malformed CSV in file: {csv_path}: {exc}") from exc
 
-
-def collect_info(uid: str, data_dir: str = "uniprot") -> Dict[str, str]:
+def collect_info(uid: str, data_dir: str = "uniprot") -> Dict[str, Any]:
     """Return names, organism, keyword, PTM, isoform, cross-ref, and activity data for ``uid``.
 
     Args:
@@ -728,6 +863,10 @@ def collect_info(uid: str, data_dir: str = "uniprot") -> Dict[str, str]:
     result.update(iso)
     result.update(cross)
     result.update(activity)
+    result["uniProtkbId"] = extract_uniprotkb_id(data)
+    result["secondaryAccessions"] = extract_secondary_accessions(data)
+    result["recommendedName"] = extract_recommended_name(data)
+    result["geneName"] = extract_gene_name(data)
     return result
 
 
@@ -801,6 +940,10 @@ def process(
         "TCDB",
         "reactions",
         "reaction_ec_numbers",
+        "uniProtkbId",
+        "secondaryAccessions",
+        "recommendedName",
+        "geneName",
     ]
 
     try:
@@ -808,6 +951,8 @@ def process(
             writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter=sep)
             writer.writeheader()
             for uid in iter_ids(input_csv, sep=sep, encoding=encoding):
-                writer.writerow(collect_info(uid, data_dir))
+                info = collect_info(uid, data_dir)
+                info["secondaryAccessions"] = "|".join(info["secondaryAccessions"])
+                writer.writerow(info)
     except OSError as exc:
         raise OSError(f"failed to write output CSV: {output_csv}: {exc}") from exc
