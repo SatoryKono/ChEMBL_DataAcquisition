@@ -130,7 +130,7 @@ def get_table(source: pd.DataFrame) -> pd.DataFrame:
         "full_name_path",
         "gene",
         "component_description",
-        "names_x",
+        "synonyms_x",
         "chembl_alternative_name",
         "pref_name" ,
     ]
@@ -143,10 +143,10 @@ def get_table(source: pd.DataFrame) -> pd.DataFrame:
             "pref_name",
             "gene",
             "chembl_alternative_name",
-            "names_x",
-            "cellular_component_x",
-            "subcellular_location_x",
-            "topology_x",
+            "synonyms_x",
+            "cellular_component",
+            "subcellular_location",
+            "topology",
         ],
     )
 
@@ -160,8 +160,8 @@ def get_table(source: pd.DataFrame) -> pd.DataFrame:
         "gene": "string",
         "uniprot_id": "string",
         "chembl_alternative_name": "string",
-        "names_x": "string",
-        "target_id": "Int64",
+        "synonyms_x": "string",
+        "target_id": "string",
         "IUPHAR_family_id": "Int64",
         "IUPHAR_type": "string",
         "IUPHAR_class": "string",
@@ -181,7 +181,7 @@ def get_table(source: pd.DataFrame) -> pd.DataFrame:
                 r.get("gene"),
                 r.get("pref_name"),
                 r.get("component_description"),
-                r.get("names_x"),
+                r.get("synonyms_x"),
                 r.get("chembl_alternative_name"),
             ]
         ),

@@ -16,6 +16,35 @@ from library import uniprot_library as uu
 
 logger = logging.getLogger(__name__)
 
+def _pipe_merge(values: Sequence[str | None]) -> str:
+    """Return a ``"|"``-joined string of unique, non-empty tokens.
+
+    Parameters
+    ----------
+    values:
+        Sequence of pipe-delimited strings to merge.
+
+    Returns
+    -------
+    str
+        Sorted, unique tokens separated by ``"|"``. Empty inputs yield
+        an empty string.
+    """
+
+    tokens: set[str] = set()
+    for value in values:
+        if isinstance(value, str) and value:
+            parts = [p.strip() for p in value.split("|") if p.strip()]
+            tokens.update(parts)
+    return "|".join(sorted(tokens))
+
+
+def _first_token(value: str | None) -> str:
+    """Return the first token from a pipe-delimited ``value``."""
+
+    if isinstance(value, str) and value:
+        return value.split("|")[0]
+    return ""
 
 def read_ids(
     path: str | Path,
@@ -392,32 +421,67 @@ def run_all(args: argparse.Namespace) -> int:
         finally:
             tmp_path.unlink(missing_ok=True)
 
-        # Run IUPHAR mapping using UniProt output
+        # Load UniProt output
+        uniprot_df = pd.read_csv(
+            uniprot_out, sep=args.sep, encoding=args.encoding, dtype=str
+        )
+
+        # Prepare combined input for IUPHAR containing ChEMBL and UniProt data
+        combined_df = chembl_df.merge(uniprot_df, on="uniprot_id", how="left")
+        
+        # Consolidate synonym and EC number information for classification
+        combined_df["synonyms"] = combined_df.apply(
+            lambda r: _pipe_merge(
+                [
+                    r.get("pref_name"),
+                    r.get("component_description"),
+                    r.get("gene"),
+                    r.get("chembl_alternative_name"),
+                    r.get("names"),
+                ]
+            ),
+            axis=1,
+        )
+        combined_df["ec_number"] = combined_df.apply(
+            lambda r: _pipe_merge([r.get("ec_numbers"), r.get("reaction_ec_numbers")]),
+            axis=1,
+        )
+        combined_df["gene_name"] = combined_df["gene"].apply(_first_token)
+        combined_df = combined_df.drop(columns=["ec_numbers", "reaction_ec_numbers"], errors="ignore")
+
+        with NamedTemporaryFile(
+            "w", delete=False, encoding=args.encoding, newline=""
+        ) as tmp:
+            combined_df.to_csv(tmp, index=False, sep=args.sep, encoding=args.encoding)
+            iuphar_input = Path(tmp.name)
+
+        # Run IUPHAR mapping using combined data
         iuphar_args = argparse.Namespace(
-            input_csv=uniprot_out,
+            input_csv=iuphar_input,
             output_csv=iuphar_out,
             target_csv=args.target_csv,
             family_csv=args.family_csv,
             sep=args.sep,
             encoding=args.encoding,
         )
-        if run_iuphar(iuphar_args) != 0:
-            return 1
+        try:
+            if run_iuphar(iuphar_args) != 0:
+                return 1
+        finally:
+            iuphar_input.unlink(missing_ok=True)
 
         # Merge results using pandas
-        uniprot_df = pd.read_csv(
-            uniprot_out, sep=args.sep, encoding=args.encoding, dtype=str
-        )
+
         iuphar_df = pd.read_csv(
             iuphar_out, sep=args.sep, encoding=args.encoding, dtype=str
         )
-        classification_cols = [
-            c for c in iuphar_df.columns if c not in {"uniprot_id", "hgnc_name"}
-        ]
+        existing_cols = set(chembl_df.columns) | set(uniprot_df.columns)
+        classification_cols = [c for c in iuphar_df.columns if c not in existing_cols]
+
         iuphar_df = iuphar_df[["uniprot_id", *classification_cols]]
 
-        merged = chembl_df.merge(uniprot_df, on="uniprot_id", how="left")
-        merged = merged.merge(iuphar_df, on="uniprot_id", how="left")
+        merged = combined_df.merge(iuphar_df, on="uniprot_id", how="left")
+
         merged.to_csv(
             args.output_csv, index=False, sep=args.sep, encoding=args.encoding
         )

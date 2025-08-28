@@ -489,7 +489,11 @@ ACTIVITY_COLUMNS = [
 ]
 
 
-def get_activities(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
+def get_activities(
+    ids: Iterable[str],
+    chunk_size: int = 5,
+    timeout: float = 30.0,
+) -> pd.DataFrame:
     """Fetch activity records for ``ids``.
 
     Parameters
@@ -498,6 +502,8 @@ def get_activities(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
         Activity identifiers to retrieve.
     chunk_size:
         Maximum number of IDs per HTTP request.
+    timeout:
+        Timeout in seconds for each HTTP request.
 
     Returns
     -------
@@ -515,7 +521,7 @@ def get_activities(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
             + ",".join(chunk)
         )
         try:
-            response = _session.get(url, timeout=30)
+            response = _session.get(url, timeout=timeout)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - network
             logger.warning("Bulk activity request failed for %s: %s", chunk, exc)

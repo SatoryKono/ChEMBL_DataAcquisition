@@ -403,17 +403,22 @@ class IUPHARData:
                 record = classifier.by_target_id(tid)
             else:
                 ec = row.get("ec_number", "")
-                if not ec:
-                    return pd.Series(
-                        {
-                            "IUPHAR_family_id": "",
-                            "IUPHAR_type": "",
-                            "IUPHAR_class": "",
-                            "IUPHAR_subclass": "",
-                            "IUPHAR_chain": "",
-                        }
-                    )
-                record = classifier.by_ec_number(ec)
+                if ec:
+                    record = classifier.by_ec_number(ec)
+                else:
+                    mf = row.get("molecular_function", "")
+                    if mf:
+                        record = classifier.by_molecular_function(mf)
+                    else:
+                        return pd.Series(
+                            {
+                                "IUPHAR_family_id": "",
+                                "IUPHAR_type": "",
+                                "IUPHAR_class": "",
+                                "IUPHAR_subclass": "",
+                                "IUPHAR_chain": "",
+                            }
+                        )
             return pd.Series(
                 {
                     "IUPHAR_family_id": record.IUPHAR_family_id,
@@ -903,6 +908,41 @@ class IUPHARClassifier:
             IUPHAR_ecNumber=numbers,
             STATUS="ec_number",
         )
+    def by_molecular_function(self, function: str) -> ClassificationRecord:
+        """Classify based on a UniProt ``molecular_function`` string.
+
+        The function uses :meth:`_name_to_type` to infer an ``IUPHAR_type``
+        from free-text molecular function descriptions. The resulting type is
+        mapped to a classification chain via :attr:`_CHAIN_MAP`.
+
+        Parameters
+        ----------
+        function:
+            Pipe-delimited molecular function annotations from UniProt.
+
+        Returns
+        -------
+        ClassificationRecord
+            Classification derived solely from molecular function keywords or
+            a default record when the input is empty.
+        """
+
+        if not self._is_valid_parameter(function):
+            return ClassificationRecord()
+
+        type_val = self._name_to_type(function)
+        parts = type_val.split(".")
+        cls_part = parts[0] if parts else "Other Protein Target"
+        sub_part = parts[1] if len(parts) > 1 else "Other Protein Target"
+        tree = self._CHAIN_MAP.get(type_val, ["0864-1", "0864"])
+        return ClassificationRecord(
+            IUPHAR_type=type_val,
+            IUPHAR_class=cls_part,
+            IUPHAR_subclass=sub_part,
+            IUPHAR_tree=tree,
+            IUPHAR_name=function,
+            STATUS="molecular_function",
+        )
 
     def by_name(self, iuphar_name: str) -> ClassificationRecord:
         """Classify based on a free-text IUPHAR name."""
@@ -1079,4 +1119,3 @@ class IUPHARClassifier:
                 }
             )
         return pd.DataFrame(records)
-

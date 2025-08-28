@@ -88,7 +88,7 @@ def fetch_pubmed_records(
     pmids: list[str],
     sleep: float,
     max_workers: int = 1,
-    batch_size: int = 200,
+    batch_size: int = 100,
 ) -> pd.DataFrame:
     """Retrieve metadata for a list of PubMed identifiers.
 
@@ -253,7 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     pubmed.add_argument(
         "--batch-size",
         type=int,
-        default=200,
+        default=100,
         help="Maximum PMIDs per PubMed request",
     )
     pubmed.set_defaults(func=run_pubmed)
