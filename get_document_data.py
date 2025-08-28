@@ -145,11 +145,18 @@ def fetch_pubmed_records(
 
     records: list[dict[str, str]] = []
     batches = [pmids[i : i + batch_size] for i in range(0, len(pmids), batch_size)]
+    total = len(pmids)
+    processed = 0
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = [ex.submit(_fetch_batch, batch) for batch in batches]
+        futures = {ex.submit(_fetch_batch, batch): len(batch) for batch in batches}
         for future in as_completed(futures):
+            batch_len = futures[future]
             records.extend(future.result())
-
+            processed += batch_len
+            percent = processed / total * 100
+            logger.info(
+                "Processed %d/%d documents (%.1f%%)", processed, total, percent
+            )
     if not records:
         return pd.DataFrame()
     return pd.DataFrame(records)
