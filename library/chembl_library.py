@@ -38,6 +38,8 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 import logging
+import time
+
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
@@ -70,6 +72,7 @@ TARGET_FIELDS = [
     "relationship",
     "gene",
     "uniprot_id",
+    "mapping_uniprot_id",
     "chembl_alternative_name",
     "ec_code",
     "hgnc_name",
@@ -103,21 +106,80 @@ def _parse_alt_names(synonyms: list[dict[str, str]]) -> str:
     return "|".join(sorted(names))
 
 
-def _parse_uniprot_id(xrefs: list[dict[str, str]]) -> str:
-    """Extract a UniProt accession from a list of cross references.
+def _map_chembl_to_uniprot(chembl_id: str) -> str:
+    """Map a ChEMBL target ID to a UniProt accession.
 
-    The ChEMBL API may label UniProt references with slightly different
-    source database names; the check therefore normalises the label to
-    upper case and matches common variants.
+    The UniProt ID mapping service is asynchronous. A job is submitted and
+    polled until completion. Network failures or missing mappings yield an
+    empty string.
     """
 
+    if not chembl_id:
+        return ""
+
+    try:
+        resp = _session.post(
+            "https://rest.uniprot.org/idmapping/run",
+            data={"from": "ChEMBL", "to": "UniProtKB", "ids": chembl_id},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        job_id = resp.json().get("jobId")
+        if not job_id:
+            return ""
+        status_url = f"https://rest.uniprot.org/idmapping/status/{job_id}"
+        result_url = f"https://rest.uniprot.org/idmapping/uniprotkb/results/{job_id}"
+        for _ in range(10):
+            status_resp = _session.get(status_url, timeout=30)
+            status_resp.raise_for_status()
+            status = status_resp.json()
+            if status.get("jobStatus") == "FINISHED":
+                result_resp = _session.get(result_url, timeout=30)
+                result_resp.raise_for_status()
+                data = result_resp.json()
+                items = data.get("results") or []
+                if items:
+                    return items[0].get("to", "")
+                return ""
+            if status.get("jobStatus") == "FAILED":
+                return ""
+            time.sleep(1)
+    except requests.RequestException as exc:  # pragma: no cover - network
+        logger.warning("UniProt mapping request failed for %s: %s", chembl_id, exc)
+    except ValueError as exc:  # pragma: no cover - malformed JSON
+        logger.warning(
+            "Failed to decode UniProt mapping response for %s: %s", chembl_id, exc
+        )
+    return ""
+
+
+def _parse_uniprot_id(xrefs: list[dict[str, str]], chembl_id: str) -> tuple[str, str]:
+    """Return UniProt IDs from cross references and mapping.
+
+    Parameters
+    ----------
+    xrefs:
+        Cross references returned by the ChEMBL API.
+    chembl_id:
+        ChEMBL target identifier used for UniProt mapping.
+
+    Returns
+    -------
+    tuple[str, str]
+        A pair ``(uniprot_id, mapping_uniprot_id)``.
+    """
+
+    uniprot_id = ""
     for x in xrefs:
         src = (x.get("xref_src_db") or "").upper()
         if src in {"UNIPROT", "UNIPROT ACCESSION", "UNIPROT ACC", "UNIPROTKB"}:
             ident = x.get("xref_id", "")
             if ident:
-                return ident
-    return ""
+                uniprot_id = ident
+                break
+    mapping_uniprot_id = _map_chembl_to_uniprot(chembl_id)
+    return uniprot_id, mapping_uniprot_id
+
 
 
 def _parse_hgnc(xrefs: list[dict[str, str]]) -> tuple[str, str]:
@@ -183,7 +245,9 @@ def _parse_target_record(data: dict[str, Any]) -> dict[str, Any]:
     gene = _parse_gene_synonyms(synonyms)
     ec_code = _parse_ec_codes(synonyms)
     alt_name = _parse_alt_names(synonyms)
-    uniprot_id = _parse_uniprot_id(xrefs)
+    uniprot_id, mapping_uniprot_id = _parse_uniprot_id(
+        xrefs, data.get("target_chembl_id", "")
+    )
     hgnc_name, hgnc_id = _parse_hgnc(xrefs)
 
     return {
@@ -194,6 +258,7 @@ def _parse_target_record(data: dict[str, Any]) -> dict[str, Any]:
         "relationship": comp.get("relationship", ""),
         "gene": gene,
         "uniprot_id": uniprot_id,
+        "mapping_uniprot_id": mapping_uniprot_id,
         "chembl_alternative_name": alt_name,
         "ec_code": ec_code,
         "hgnc_name": hgnc_name,
@@ -213,8 +278,10 @@ def get_target(chembl_target_id: str) -> dict[str, Any]:
     -------
     dict
         A dictionary containing information about the target, including
-        a ``uniprot_id`` when a UniProt cross reference is present. If the
-        request fails an empty dictionary with pre-defined keys is returned.
+        both a ``uniprot_id`` parsed from cross references and a
+        ``mapping_uniprot_id`` obtained via the UniProt ID mapping service.
+        If the request fails an empty dictionary with pre-defined keys is
+        returned.
     """
     if chembl_target_id in {"", "#N/A"}:
         return dict(EMPTY_TARGET)
@@ -359,11 +426,7 @@ def get_assay(chembl_assay_id: str) -> pd.DataFrame:
     return df
 
 
-def get_assays_all(
-    ids: Iterable[str],
-    chunk_size: int = 5,
-    timeout: float = 30.0,
-) -> pd.DataFrame:
+def get_assays_all(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
     """Fetch assay records for ``ids``.
 
     Parameters
@@ -372,8 +435,6 @@ def get_assays_all(
         Assay identifiers to retrieve.
     chunk_size:
         Maximum number of IDs per HTTP request.
-    timeout:
-        Timeout in seconds for each HTTP request.
 
     Returns
     -------
@@ -391,7 +452,7 @@ def get_assays_all(
             + ",".join(chunk)
         )
         try:
-            response = _session.get(url, timeout=timeout)
+            response = _session.get(url, timeout=1000)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - network
             logger.warning("Bulk assay request failed for %s: %s", chunk, exc)
@@ -418,11 +479,7 @@ def get_assays_all(
     df = pd.concat(records, ignore_index=True)
     return df.reindex(columns=ASSAY_COLUMNS)
 
-def get_assays_notNull(
-    ids: Iterable[str],
-    chunk_size: int = 5,
-    timeout: float = 30.0,
-) -> pd.DataFrame:
+def get_assays_notNull(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
     """Fetch assay records for ``ids``.
 
     Parameters
@@ -431,8 +488,6 @@ def get_assays_notNull(
         Assay identifiers to retrieve.
     chunk_size:
         Maximum number of IDs per HTTP request.
-    timeout:
-        Timeout in seconds for each HTTP request.
 
     Returns
     -------
@@ -450,7 +505,7 @@ def get_assays_notNull(
             + ",".join(chunk)
         )
         try:
-            response = _session.get(url, timeout=timeout)
+            response = _session.get(url, timeout=1000)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - network
             logger.warning("Bulk assay request failed for %s: %s", chunk, exc)

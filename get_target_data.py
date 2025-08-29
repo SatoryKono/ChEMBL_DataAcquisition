@@ -13,10 +13,8 @@ import pandas as pd
 from library import chembl_library as cl
 from library import iuphar_library as ii
 from library import uniprot_library as uu
-from library.target_postprocessing import postprocess_targets
 
 logger = logging.getLogger(__name__)
-
 
 def _pipe_merge(values: Sequence[str | None]) -> str:
     """Return a ``"|"``-joined string of unique, non-empty tokens.
@@ -47,7 +45,6 @@ def _first_token(value: str | None) -> str:
     if isinstance(value, str) and value:
         return value.split("|")[0]
     return ""
-
 
 def read_ids(
     path: str | Path,
@@ -95,7 +92,6 @@ def read_ids(
     except csv.Error as exc:
         raise ValueError(f"malformed CSV in file: {path}: {exc}") from exc
 
-
 def build_parser() -> argparse.ArgumentParser:
     """Create and return the top-level CLI argument parser.
 
@@ -129,6 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
         "output_csv",
         type=Path,
         help="Destination CSV file for the extracted information",
+    )
+    uniprot.add_argument(
+        "--column",
+        default="uniprot_id",
+        choices=["uniprot_id", "mapping_uniprot_id"],
+        help="Column in the input CSV containing UniProt accessions",
     )
     uniprot.add_argument(
         "--sep",
@@ -264,6 +266,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("data/_IUPHAR_family.csv"),
         help="Path to the _IUPHAR_family.csv file",
     )
+    all_cmd.add_argument(
+        "--uniprot-column",
+        default="uniprot_id",
+        choices=["uniprot_id", "mapping_uniprot_id"],
+        help="Column from ChEMBL output to use for UniProt processing",
+    )
     all_cmd.add_argument("--sep", default=",", help="CSV delimiter for I/O")
     all_cmd.add_argument(
         "--encoding",
@@ -273,7 +281,6 @@ def build_parser() -> argparse.ArgumentParser:
     all_cmd.set_defaults(func=run_all)
 
     return parser
-
 
 def configure_logging(level: str) -> None:
     """Configure basic logging.
@@ -307,13 +314,39 @@ def run_uniprot(args: argparse.Namespace) -> int:
     """
 
     try:
+        input_csv = args.input_csv
+        if args.column != "uniprot_id":
+            ids = read_ids(
+                input_csv, column=args.column, sep=args.sep, encoding=args.encoding
+            )
+            from tempfile import NamedTemporaryFile
+
+            with NamedTemporaryFile(
+                "w", delete=False, encoding=args.encoding, newline=""
+            ) as tmp:
+                writer = csv.DictWriter(tmp, fieldnames=["uniprot_id"], delimiter=args.sep)
+                writer.writeheader()
+                for uid in ids:
+                    writer.writerow({"uniprot_id": uid})
+                input_csv = Path(tmp.name)
+
         uu.process(
-            input_csv=str(args.input_csv),
+            input_csv=str(input_csv),
             output_csv=str(args.output_csv),
             data_dir=str(args.data_dir),
             sep=args.sep,
             encoding=args.encoding,
         )
+
+        if args.column != "uniprot_id":
+            out_df = pd.read_csv(
+                args.output_csv, sep=args.sep, encoding=args.encoding, dtype=str
+            )
+            out_df.insert(1, args.column, ids)
+            out_df.to_csv(
+                args.output_csv, index=False, sep=args.sep, encoding=args.encoding
+            )
+            input_csv.unlink(missing_ok=True)
         return 0
     except (FileNotFoundError, ValueError, OSError) as exc:
         logger.error("%s", exc)
@@ -402,12 +435,14 @@ def run_all(args: argparse.Namespace) -> int:
         ).rename(columns={"target_chembl_id": "chembl_id"})
 
         # Extract UniProt IDs and write temporary CSV for downstream steps
-        uids = [u for u in chembl_df.get("uniprot_id", []) if isinstance(u, str) and u]
+        uids = [
+            u
+            for u in chembl_df.get(args.uniprot_column, [])
+            if isinstance(u, str) and u
+        ]
         from tempfile import NamedTemporaryFile
 
-        with NamedTemporaryFile(
-            "w", delete=False, encoding=args.encoding, newline=""
-        ) as tmp:
+        with NamedTemporaryFile("w", delete=False, encoding=args.encoding, newline="") as tmp:
             writer = csv.DictWriter(tmp, fieldnames=["uniprot_id"], delimiter=args.sep)
             writer.writeheader()
             for uid in uids:
@@ -421,6 +456,7 @@ def run_all(args: argparse.Namespace) -> int:
             data_dir=args.data_dir,
             sep=args.sep,
             encoding=args.encoding,
+            column="uniprot_id",
         )
         try:
             if run_uniprot(uniprot_args) != 0:
@@ -432,10 +468,14 @@ def run_all(args: argparse.Namespace) -> int:
         uniprot_df = pd.read_csv(
             uniprot_out, sep=args.sep, encoding=args.encoding, dtype=str
         )
+        if args.uniprot_column != "uniprot_id":
+            uniprot_df[args.uniprot_column] = uniprot_df["uniprot_id"]
 
         # Prepare combined input for IUPHAR containing ChEMBL and UniProt data
-        combined_df = chembl_df.merge(uniprot_df, on="uniprot_id", how="left")
-
+        combined_df = chembl_df.merge(
+            uniprot_df, on=args.uniprot_column, how="left"
+        )
+        
         # Consolidate synonym and EC number information for classification
         combined_df["synonyms"] = combined_df.apply(
             lambda r: _pipe_merge(
@@ -455,9 +495,7 @@ def run_all(args: argparse.Namespace) -> int:
             axis=1,
         )
         combined_df["gene_name"] = combined_df["gene"].apply(_first_token)
-        combined_df = combined_df.drop(
-            columns=["ec_numbers", "reaction_ec_numbers"], errors="ignore"
-        )
+        combined_df = combined_df.drop(columns=["ec_numbers", "reaction_ec_numbers"], errors="ignore")
 
         with NamedTemporaryFile(
             "w", delete=False, encoding=args.encoding, newline=""
@@ -491,8 +529,6 @@ def run_all(args: argparse.Namespace) -> int:
         iuphar_df = iuphar_df[["uniprot_id", *classification_cols]]
 
         merged = combined_df.merge(iuphar_df, on="uniprot_id", how="left")
-
-        merged = postprocess_targets(merged)
 
         merged.to_csv(
             args.output_csv, index=False, sep=args.sep, encoding=args.encoding
