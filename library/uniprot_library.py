@@ -65,6 +65,7 @@ __all__ = [
     "extract_names",
     "extract_uniprotkb_id",
     "extract_secondary_accessions",
+    "extract_names_for_secondary_accessions",
     "extract_recommended_name",
     "extract_gene_name",
     "extract_keywords",
@@ -118,7 +119,7 @@ def _collect_name_fields(name_obj: Dict[str, Any]) -> Iterable[str]:
         value = full.get("value")
         if value:
             names.append(value)
-    short = name_obj.get("shortName")
+    short = name_obj.get("shortName") or name_obj.get("shortNames")
     if isinstance(short, dict):
         value = short.get("value")
         if value:
@@ -139,7 +140,7 @@ def _extract_protein_names(desc: Dict[str, Any]) -> Set[str]:
     rec = desc.get("recommendedName")
     if isinstance(rec, dict):
         names.update(_collect_name_fields(rec))
-    for key in ("alternativeNames", "submissionNames"):
+    for key in ("alternativeNames", "submissionNames", "submittedName"):
         items = desc.get(key) or []
         for item in items:
             names.update(_collect_name_fields(item))
@@ -372,6 +373,36 @@ def extract_gene_name(data: Any) -> str | None:
                     return value
         break
     return None
+
+def extract_names_for_secondary_accessions(data: Any) -> str:
+    """Return protein names for secondary accessions listed in ``data``.
+
+    The function looks up each secondary accession via :func:`fetch_uniprot`
+    and aggregates all protein names from common description fields. Names are
+    deduplicated and returned as a single pipe-separated string. When no names
+    are found or the entry cannot be retrieved, an empty string is returned.
+
+    Parameters
+    ----------
+    data:
+        A UniProt JSON structure, list of entries, or search results containing
+        UniProt entries.
+
+    Returns
+    -------
+    str
+        Pipe-separated protein names for all secondary accessions.
+    """
+
+    names: Set[str] = set()
+    for acc in extract_secondary_accessions(data):
+        entry = fetch_uniprot(acc)
+        if not isinstance(entry, dict):
+            continue
+        desc = entry.get("proteinDescription")
+        if isinstance(desc, dict):
+            names.update(_extract_protein_names(desc))
+    return "|".join(sorted(names))
 
 def _collect_ec_numbers(name_obj: Dict[str, Any]) -> Iterable[str]:
     """Yield EC numbers from a UniProt name object."""
@@ -809,6 +840,7 @@ def collect_info(uid: str, data_dir: str = "uniprot") -> Dict[str, Any]:
         "TCDB": "",
         "reactions": "",
         "reaction_ec_numbers": "",
+        "secondaryAccessionNames": "",
     }
     try:
         with open(json_path, "r", encoding="utf-8") as handle:
@@ -871,6 +903,7 @@ def collect_info(uid: str, data_dir: str = "uniprot") -> Dict[str, Any]:
     result["secondaryAccessions"] = extract_secondary_accessions(data)
     result["recommendedName"] = extract_recommended_name(data)
     result["geneName"] = extract_gene_name(data)
+    result["secondaryAccessionNames"] = extract_names_for_secondary_accessions(data)
     return result
 
 
@@ -948,6 +981,7 @@ def process(
         "secondaryAccessions",
         "recommendedName",
         "geneName",
+        "secondaryAccessionNames",
     ]
 
     try:
