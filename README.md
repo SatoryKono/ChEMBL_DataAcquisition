@@ -255,3 +255,29 @@ Tests
 test_iuphar_mapping.py — verifies map_uniprot_file maps UniProt ID to target ID and writes expected CSV.
 
 test_read_ids.py — validates read_ids: filtering of empty/#N/A, error when column missing.
+
+## Target post-processing
+
+The combined CSV produced by `get_target_data.py all` can be normalised
+with the standalone script ``main.py``:
+
+```bash
+python main.py raw_targets.csv postprocessed_targets.csv
+```
+
+The command accepts ``--sep`` and ``--encoding`` options mirroring the
+main pipeline. Logging verbosity can be controlled with ``--log-level``.
+
+### Development
+
+Recommended quality tools:
+
+```bash
+ruff .
+black --check .
+mypy mylib
+pytest
+```
+
+These commands ensure code style, type correctness and unit-test
+coverage.
