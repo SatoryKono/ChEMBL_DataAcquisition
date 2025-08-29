@@ -359,7 +359,11 @@ def get_assay(chembl_assay_id: str) -> pd.DataFrame:
     return df
 
 
-def get_assays_all(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
+def get_assays_all(
+    ids: Iterable[str],
+    chunk_size: int = 5,
+    timeout: float = 30.0,
+) -> pd.DataFrame:
     """Fetch assay records for ``ids``.
 
     Parameters
@@ -368,6 +372,8 @@ def get_assays_all(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
         Assay identifiers to retrieve.
     chunk_size:
         Maximum number of IDs per HTTP request.
+    timeout:
+        Timeout in seconds for each HTTP request.
 
     Returns
     -------
@@ -385,7 +391,7 @@ def get_assays_all(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
             + ",".join(chunk)
         )
         try:
-            response = _session.get(url, timeout=1000)
+            response = _session.get(url, timeout=timeout)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - network
             logger.warning("Bulk assay request failed for %s: %s", chunk, exc)
@@ -404,8 +410,7 @@ def get_assays_all(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
             if not df_chunk.empty:
                 records.append(df_chunk)
 
-    # Drop empty or all-NA frames to avoid pandas concat warnings
-    records = [r for r in records if not r.empty and not r.isna().all().all()]
+    # If every request failed or returned only empty records, yield an empty frame
 
     if not records:
         return pd.DataFrame(columns=ASSAY_COLUMNS)
@@ -413,7 +418,11 @@ def get_assays_all(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
     df = pd.concat(records, ignore_index=True)
     return df.reindex(columns=ASSAY_COLUMNS)
 
-def get_assays_notNull(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
+def get_assays_notNull(
+    ids: Iterable[str],
+    chunk_size: int = 5,
+    timeout: float = 30.0,
+) -> pd.DataFrame:
     """Fetch assay records for ``ids``.
 
     Parameters
@@ -422,6 +431,8 @@ def get_assays_notNull(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
         Assay identifiers to retrieve.
     chunk_size:
         Maximum number of IDs per HTTP request.
+    timeout:
+        Timeout in seconds for each HTTP request.
 
     Returns
     -------
@@ -439,7 +450,7 @@ def get_assays_notNull(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
             + ",".join(chunk)
         )
         try:
-            response = _session.get(url, timeout=1000)
+            response = _session.get(url, timeout=timeout)
             response.raise_for_status()
         except requests.RequestException as exc:  # pragma: no cover - network
             logger.warning("Bulk assay request failed for %s: %s", chunk, exc)
@@ -458,8 +469,8 @@ def get_assays_notNull(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
             if not df_chunk.empty:
                 records.append(df_chunk)
 
-    # Drop empty or all-NA frames to avoid pandas concat warnings
-    records = [r for r in records if not r.empty and not r.isna().all().all()]
+    # If every request failed or returned only empty records, yield an empty frame
+
     if not records:
         return pd.DataFrame(columns=ASSAY_COLUMNS)
 

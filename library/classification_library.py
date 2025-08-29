@@ -170,9 +170,17 @@ def get_table(source: pd.DataFrame) -> pd.DataFrame:
         "full_id_path": "string",
         "full_name_path": "string",
     }
+    numeric_types = {"Int64", "float64", "Float64", "int64", "int32"}
     for col, t in type_map.items():
         if col in typed.columns:
-            typed[col] = typed[col].astype(t)
+            try:
+                if t in numeric_types:
+                    # Coerce non-numeric values to NaN for numeric fields
+                    typed[col] = pd.to_numeric(typed[col], errors="coerce").astype(t)
+                else:
+                    typed[col] = typed[col].astype(t)
+            except (ValueError, TypeError) as exc:  # pragma: no cover - log path
+                logger.warning("Could not convert column %s to type %s: %s", col, t, exc)
 
     typed["gene_name"] = typed["gene"].str.split("|").str[0]
     typed["_alternative_names"] = typed.apply(
@@ -301,7 +309,7 @@ def build_base(source: pd.DataFrame) -> pd.DataFrame:
     return excluded
 
 
-def get_multyply(source: pd.DataFrame) -> pd.DataFrame:
+def  get_multiply(source: pd.DataFrame) -> pd.DataFrame:
     """Select whitelisted multiple matches."""
 
     base = build_base(source)
@@ -323,7 +331,7 @@ def main_process(df: pd.DataFrame) -> pd.DataFrame:
     counts = base.groupby(group_cols).size().reset_index(name="Count")
     singles = counts[counts["Count"] == 1]
     expanded = singles.merge(base, on=group_cols, how="left")
-    combined = pd.concat([expanded, get_multyply(table1)], ignore_index=True)
+    combined = pd.concat([expanded,  get_multiply(table1)], ignore_index=True)
     if "Count" in combined.columns:
         combined = combined.drop(columns=["Count"])
     return combined

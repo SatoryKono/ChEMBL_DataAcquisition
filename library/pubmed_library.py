@@ -67,8 +67,7 @@ def _do_request(
     for attempt in range(retries + 1):
         if attempt:
             time.sleep(sleep * attempt)
-        else:
-            time.sleep(sleep)
+        
         try:
             resp = session.get(url, timeout=TIMEOUT, **kwargs)
         except requests.RequestException as exc:
@@ -162,8 +161,8 @@ def text_or_none(node: Optional[ET.Element]) -> Optional[str]:
 
 
 def combine(items: Iterable[str]) -> str:
-    """Combine non-empty items into a pipe separated string."""
-    return "| ".join([x for x in items if x])
+    """Combine non-empty items into a pipe-separated string without spaces."""
+    return "|".join(x for x in items if x)
 
 
 def find_one(node: Optional[ET.Element], xpath: str) -> Optional[ET.Element]:
