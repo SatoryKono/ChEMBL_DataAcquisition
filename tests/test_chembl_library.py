@@ -108,3 +108,23 @@ def test_extend_target(monkeypatch) -> None:
     out_df = cl.extend_target(input_df)
     assert out_df.loc[0, "chembl_pref_name"] == "MAP3K14"
     assert out_df.loc[0, "chembl_gene"] == "MAP3K14"
+
+
+def test_get_assays_all_timeout(monkeypatch) -> None:
+    def fake_get(url: str, timeout: float):
+        assert timeout == 10
+        return FakeResponse({"assays": [{"assay_chembl_id": "A1"}]})
+
+    monkeypatch.setattr(cl._session, "get", fake_get)
+    df = cl.get_assays_all(["A1"], chunk_size=1, timeout=10)
+    assert df.loc[0, "assay_chembl_id"] == "A1"
+
+
+def test_get_assays_notNull_timeout(monkeypatch) -> None:
+    def fake_get(url: str, timeout: float):
+        assert timeout == 5
+        return FakeResponse({"assays": [{"assay_chembl_id": "A1"}]})
+
+    monkeypatch.setattr(cl._session, "get", fake_get)
+    df = cl.get_assays_notNull(["A1"], chunk_size=1, timeout=5)
+    assert df.loc[0, "assay_chembl_id"] == "A1"
