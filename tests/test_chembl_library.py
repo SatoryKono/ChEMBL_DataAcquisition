@@ -70,6 +70,7 @@ SAMPLE_DF = pd.DataFrame(
         "relationship": ["single"],
         "gene": ["MAP3K14"],
         "uniprot_id": ["Q99558"],
+        "mapping_uniprot_id": ["Q99558"],
         "chembl_alternative_name": ["NIK"],
         "ec_code": ["2.7.11.25"],
         "hgnc_name": ["MAP3K14"],
@@ -89,16 +90,20 @@ def test_chunked_invalid_size() -> None:
 
 def test_get_target(monkeypatch) -> None:
     monkeypatch.setattr(cl._session, "get", lambda url, timeout=30: FakeResponse(SAMPLE_JSON))
+    monkeypatch.setattr(cl, "_map_chembl_to_uniprot", lambda cid: "Q99558")
     data = cl.get_target(SAMPLE_ID)
     assert data["uniprot_id"] == "Q99558"
+    assert data["mapping_uniprot_id"] == "Q99558"
     assert data["gene"] == "MAP3K14|NIK"
 
 
 def test_get_targets(monkeypatch) -> None:
     bulk_json = {"targets": [SAMPLE_JSON]}
     monkeypatch.setattr(cl._session, "get", lambda url, timeout=30: FakeResponse(bulk_json))
+    monkeypatch.setattr(cl, "_map_chembl_to_uniprot", lambda cid: "Q99558")
     df = cl.get_targets([SAMPLE_ID])
     assert df.loc[0, "uniprot_id"] == "Q99558"
+    assert df.loc[0, "mapping_uniprot_id"] == "Q99558"
     assert df.shape[0] == 1
 
 

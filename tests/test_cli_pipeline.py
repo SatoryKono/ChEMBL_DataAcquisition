@@ -25,6 +25,7 @@ def _sample_chembl_df() -> pd.DataFrame:
             "relationship": ["single"],
             "gene": ["MAP3K14"],
             "uniprot_id": ["Q99558"],
+            "mapping_uniprot_id": ["Q99558"],
             "chembl_alternative_name": ["NIK"],
             "ec_code": ["2.7.11.25"],
             "hgnc_name": ["MAP3K14"],
@@ -60,6 +61,7 @@ def test_run_uniprot(tmp_path: Path) -> None:
         data_dir=DATA_DIR / "uniprot",
         sep=",",
         encoding="utf8",
+        column="uniprot_id",
     )
     assert gtd.run_uniprot(args) == 0
     df = pd.read_csv(output_csv, dtype=str)
@@ -99,6 +101,7 @@ def test_run_all(monkeypatch, tmp_path: Path) -> None:
         family_csv=DATA_DIR / "_IUPHAR_family.csv",
         sep=",",
         encoding="utf8",
+        uniprot_column="uniprot_id",
     )
     assert gtd.run_all(args) == 0
     df = pd.read_csv(output_csv, dtype=str)

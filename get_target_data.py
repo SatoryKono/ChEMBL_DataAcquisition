@@ -127,6 +127,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Destination CSV file for the extracted information",
     )
     uniprot.add_argument(
+        "--column",
+        default="uniprot_id",
+        choices=["uniprot_id", "mapping_uniprot_id"],
+        help="Column in the input CSV containing UniProt accessions",
+    )
+    uniprot.add_argument(
         "--sep",
         default=",",
         help="CSV delimiter used for input and output files",
@@ -260,6 +266,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("data/_IUPHAR_family.csv"),
         help="Path to the _IUPHAR_family.csv file",
     )
+    all_cmd.add_argument(
+        "--uniprot-column",
+        default="uniprot_id",
+        choices=["uniprot_id", "mapping_uniprot_id"],
+        help="Column from ChEMBL output to use for UniProt processing",
+    )
     all_cmd.add_argument("--sep", default=",", help="CSV delimiter for I/O")
     all_cmd.add_argument(
         "--encoding",
@@ -302,13 +314,39 @@ def run_uniprot(args: argparse.Namespace) -> int:
     """
 
     try:
+        input_csv = args.input_csv
+        if args.column != "uniprot_id":
+            ids = read_ids(
+                input_csv, column=args.column, sep=args.sep, encoding=args.encoding
+            )
+            from tempfile import NamedTemporaryFile
+
+            with NamedTemporaryFile(
+                "w", delete=False, encoding=args.encoding, newline=""
+            ) as tmp:
+                writer = csv.DictWriter(tmp, fieldnames=["uniprot_id"], delimiter=args.sep)
+                writer.writeheader()
+                for uid in ids:
+                    writer.writerow({"uniprot_id": uid})
+                input_csv = Path(tmp.name)
+
         uu.process(
-            input_csv=str(args.input_csv),
+            input_csv=str(input_csv),
             output_csv=str(args.output_csv),
             data_dir=str(args.data_dir),
             sep=args.sep,
             encoding=args.encoding,
         )
+
+        if args.column != "uniprot_id":
+            out_df = pd.read_csv(
+                args.output_csv, sep=args.sep, encoding=args.encoding, dtype=str
+            )
+            out_df.insert(1, args.column, ids)
+            out_df.to_csv(
+                args.output_csv, index=False, sep=args.sep, encoding=args.encoding
+            )
+            input_csv.unlink(missing_ok=True)
         return 0
     except (FileNotFoundError, ValueError, OSError) as exc:
         logger.error("%s", exc)
@@ -397,7 +435,11 @@ def run_all(args: argparse.Namespace) -> int:
         ).rename(columns={"target_chembl_id": "chembl_id"})
 
         # Extract UniProt IDs and write temporary CSV for downstream steps
-        uids = [u for u in chembl_df.get("uniprot_id", []) if isinstance(u, str) and u]
+        uids = [
+            u
+            for u in chembl_df.get(args.uniprot_column, [])
+            if isinstance(u, str) and u
+        ]
         from tempfile import NamedTemporaryFile
 
         with NamedTemporaryFile("w", delete=False, encoding=args.encoding, newline="") as tmp:
@@ -414,6 +456,7 @@ def run_all(args: argparse.Namespace) -> int:
             data_dir=args.data_dir,
             sep=args.sep,
             encoding=args.encoding,
+            column="uniprot_id",
         )
         try:
             if run_uniprot(uniprot_args) != 0:
@@ -425,9 +468,13 @@ def run_all(args: argparse.Namespace) -> int:
         uniprot_df = pd.read_csv(
             uniprot_out, sep=args.sep, encoding=args.encoding, dtype=str
         )
+        if args.uniprot_column != "uniprot_id":
+            uniprot_df[args.uniprot_column] = uniprot_df["uniprot_id"]
 
         # Prepare combined input for IUPHAR containing ChEMBL and UniProt data
-        combined_df = chembl_df.merge(uniprot_df, on="uniprot_id", how="left")
+        combined_df = chembl_df.merge(
+            uniprot_df, on=args.uniprot_column, how="left"
+        )
         
         # Consolidate synonym and EC number information for classification
         combined_df["synonyms"] = combined_df.apply(
