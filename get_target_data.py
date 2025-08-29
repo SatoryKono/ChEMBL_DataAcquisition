@@ -13,8 +13,10 @@ import pandas as pd
 from library import chembl_library as cl
 from library import iuphar_library as ii
 from library import uniprot_library as uu
+from library.target_postprocessing import postprocess_targets
 
 logger = logging.getLogger(__name__)
+
 
 def _pipe_merge(values: Sequence[str | None]) -> str:
     """Return a ``"|"``-joined string of unique, non-empty tokens.
@@ -45,6 +47,7 @@ def _first_token(value: str | None) -> str:
     if isinstance(value, str) and value:
         return value.split("|")[0]
     return ""
+
 
 def read_ids(
     path: str | Path,
@@ -91,6 +94,7 @@ def read_ids(
         raise FileNotFoundError(f"input file not found: {path}") from exc
     except csv.Error as exc:
         raise ValueError(f"malformed CSV in file: {path}: {exc}") from exc
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Create and return the top-level CLI argument parser.
@@ -270,6 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 
+
 def configure_logging(level: str) -> None:
     """Configure basic logging.
 
@@ -400,7 +405,9 @@ def run_all(args: argparse.Namespace) -> int:
         uids = [u for u in chembl_df.get("uniprot_id", []) if isinstance(u, str) and u]
         from tempfile import NamedTemporaryFile
 
-        with NamedTemporaryFile("w", delete=False, encoding=args.encoding, newline="") as tmp:
+        with NamedTemporaryFile(
+            "w", delete=False, encoding=args.encoding, newline=""
+        ) as tmp:
             writer = csv.DictWriter(tmp, fieldnames=["uniprot_id"], delimiter=args.sep)
             writer.writeheader()
             for uid in uids:
@@ -428,7 +435,7 @@ def run_all(args: argparse.Namespace) -> int:
 
         # Prepare combined input for IUPHAR containing ChEMBL and UniProt data
         combined_df = chembl_df.merge(uniprot_df, on="uniprot_id", how="left")
-        
+
         # Consolidate synonym and EC number information for classification
         combined_df["synonyms"] = combined_df.apply(
             lambda r: _pipe_merge(
@@ -448,7 +455,9 @@ def run_all(args: argparse.Namespace) -> int:
             axis=1,
         )
         combined_df["gene_name"] = combined_df["gene"].apply(_first_token)
-        combined_df = combined_df.drop(columns=["ec_numbers", "reaction_ec_numbers"], errors="ignore")
+        combined_df = combined_df.drop(
+            columns=["ec_numbers", "reaction_ec_numbers"], errors="ignore"
+        )
 
         with NamedTemporaryFile(
             "w", delete=False, encoding=args.encoding, newline=""
@@ -482,6 +491,8 @@ def run_all(args: argparse.Namespace) -> int:
         iuphar_df = iuphar_df[["uniprot_id", *classification_cols]]
 
         merged = combined_df.merge(iuphar_df, on="uniprot_id", how="left")
+
+        merged = postprocess_targets(merged)
 
         merged.to_csv(
             args.output_csv, index=False, sep=args.sep, encoding=args.encoding
