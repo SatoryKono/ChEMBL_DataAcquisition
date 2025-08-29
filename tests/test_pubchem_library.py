@@ -31,6 +31,24 @@ def test_get_cid(monkeypatch) -> None:
     assert pl.get_cid("water") == "123|456"
 
 
+def test_get_cid_from_smiles(monkeypatch) -> None:
+    sample = {"IdentifierList": {"CID": [123, 123, 456]}}
+    monkeypatch.setattr(pl, "make_request", lambda url, delay=3.0: sample)
+    assert pl.get_cid_from_smiles("O") == "123|456"
+
+
+def test_get_cid_from_inchi(monkeypatch) -> None:
+    sample = {"IdentifierList": {"CID": [789]}}
+    monkeypatch.setattr(pl, "make_request", lambda url, delay=3.0: sample)
+    assert pl.get_cid_from_inchi("InChI=1S/H2O/h1H2") == "789"
+
+
+def test_get_cid_from_inchikey(monkeypatch) -> None:
+    sample = {"IdentifierList": {"CID": [321]}}
+    monkeypatch.setattr(pl, "make_request", lambda url, delay=3.0: sample)
+    assert pl.get_cid_from_inchikey("XLYOFNOQVPJJNP-UHFFFAOYSA-N") == "321"
+
+
 def test_get_standard_name(monkeypatch) -> None:
     sample = {"InformationList": {"Information": [{"Title": "Water"}]}}
     monkeypatch.setattr(pl, "validate_cid", lambda cid: cid)

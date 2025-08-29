@@ -167,6 +167,72 @@ def get_all_cid(compound_name: str) -> Optional[str]:
     return "|".join(unique_cids) if unique_cids else None
 
 
+def _cids_from_identifier_list(data: Dict[str, Any]) -> List[str]:
+    """Extract CIDs from a JSON ``IdentifierList`` structure."""
+
+    return [str(cid) for cid in data.get("IdentifierList", {}).get("CID", [])]
+
+
+def get_cid_from_smiles(smiles: str) -> Optional[str]:
+    """Retrieve PubChem CID(s) for a SMILES string.
+
+    Parameters
+    ----------
+    smiles: str
+        SMILES representation of a compound.
+
+    Returns
+    -------
+    str or None
+        Pipe-separated list of CIDs or ``None`` if the structure is
+        unknown to PubChem.
+    """
+
+    safe_smiles = url_encode(smiles)
+    url = (
+        "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/"
+        f"{safe_smiles}/cids/JSON"
+    )
+    response = make_request(url)
+    if not response:
+        return None
+    cids = _cids_from_identifier_list(response)
+    unique_cids = sorted(set(cids))
+    return "|".join(unique_cids) if unique_cids else None
+
+
+def get_cid_from_inchi(inchi: str) -> Optional[str]:
+    """Retrieve PubChem CID(s) for an InChI string."""
+
+    safe_inchi = url_encode(inchi)
+    url = (
+        "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/inchi/"
+        f"{safe_inchi}/cids/JSON"
+    )
+    response = make_request(url)
+    if not response:
+        return None
+    cids = _cids_from_identifier_list(response)
+    unique_cids = sorted(set(cids))
+    return "|".join(unique_cids) if unique_cids else None
+
+
+def get_cid_from_inchikey(inchikey: str) -> Optional[str]:
+    """Retrieve PubChem CID(s) for an InChIKey."""
+
+    safe_inchikey = url_encode(inchikey)
+    url = (
+        "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/inchikey/"
+        f"{safe_inchikey}/cids/JSON"
+    )
+    response = make_request(url)
+    if not response:
+        return None
+    cids = _cids_from_identifier_list(response)
+    unique_cids = sorted(set(cids))
+    return "|".join(unique_cids) if unique_cids else None
+
+
 def get_standard_name(cid: str) -> Optional[str]:
     """Retrieve the standard compound name for a given CID."""
     validated = validate_cid(cid)
@@ -267,6 +333,9 @@ __all__ = [
     "validate_cid",
     "get_cid",
     "get_all_cid",
+    "get_cid_from_smiles",
+    "get_cid_from_inchi",
+    "get_cid_from_inchikey",
     "get_standard_name",
     "get_properties",
     "process_compound",
