@@ -608,7 +608,8 @@ def get_testitem(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
         items = data.get("molecules") or data.get("molecule") or []
         if items:
             records.append(pd.json_normalize(items))
-
+ # Drop empty or all-NA frames to avoid deprecation warnings in pandas
+    records = [r for r in records if not r.empty and not r.isna().all().all()]
     if not records:
         return pd.DataFrame(columns=TESTITEM_COLUMNS)
 

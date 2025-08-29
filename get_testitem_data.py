@@ -1,4 +1,4 @@
-"""Command line interface for retrieving ChEMBL compound data."""
+"""Command line interface for retrieving ChEMBL and PubChem compound data."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ import logging
 from pathlib import Path
 from typing import Sequence
 
+import pandas as pd
+
 from library import chembl_library as cl
+from library import pubchem_library as pl
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +64,73 @@ def read_ids(
         raise ValueError(f"malformed CSV in file: {path}: {exc}") from exc
 
 
+def add_pubchem_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Augment ChEMBL records with PubChem information.
+
+    For each canonical SMILES string in ``df``, the function looks up the
+    corresponding PubChem CID and basic chemical properties. The PubChem
+    fields are appended to the input frame. If a SMILES string cannot be
+    resolved, empty values are inserted.
+
+    Parameters
+    ----------
+    df:
+        Data frame returned by :func:`library.chembl_library.get_testitem`.
+
+    Returns
+    -------
+    pandas.DataFrame
+        ``df`` with additional PubChem columns.
+    """
+
+    if df.empty or "molecule_structures.canonical_smiles" not in df.columns:
+        return df
+
+    smiles_list = df["molecule_structures.canonical_smiles"].fillna("").tolist()
+    unique_smiles = {s for s in smiles_list if s}
+
+    records: dict[str, dict[str, str]] = {}
+    for smi in unique_smiles:
+        cid = pl.get_cid_from_smiles(smi) or ""
+        first_cid = cid.split("|")[0] if cid else ""
+        if first_cid:
+            props = pl.get_properties(first_cid)
+            records[smi] = {
+                "pubchem_cid": first_cid,
+                "pubchem_iupac_name": props.IUPACName,
+                "pubchem_molecular_formula": props.MolecularFormula,
+                "pubchem_isomeric_smiles": props.iSMILES,
+                "pubchem_canonical_smiles": props.cSMILES,
+                "pubchem_inchi": props.InChI,
+                "pubchem_inchikey": props.InChIKey,
+            }
+        else:
+            records[smi] = {
+                "pubchem_cid": "",
+                "pubchem_iupac_name": "",
+                "pubchem_molecular_formula": "",
+                "pubchem_isomeric_smiles": "",
+                "pubchem_canonical_smiles": "",
+                "pubchem_inchi": "",
+                "pubchem_inchikey": "",
+            }
+
+    empty = {
+        "pubchem_cid": "",
+        "pubchem_iupac_name": "",
+        "pubchem_molecular_formula": "",
+        "pubchem_isomeric_smiles": "",
+        "pubchem_canonical_smiles": "",
+        "pubchem_inchi": "",
+        "pubchem_inchikey": "",
+    }
+    pubchem_rows = [records.get(smi, empty) for smi in smiles_list]
+    pubchem_df = pd.DataFrame(pubchem_rows)
+    return pd.concat([df.reset_index(drop=True), pubchem_df], axis=1)
+
+
 def run_chembl(args: argparse.Namespace) -> int:
-    """Execute compound retrieval from the ChEMBL API.
+    """Execute compound retrieval from the ChEMBL API and augment with PubChem data.
 
     Parameters
     ----------
@@ -86,6 +154,7 @@ def run_chembl(args: argparse.Namespace) -> int:
         return 1
 
     df = cl.get_testitem(ids, chunk_size=args.chunk_size)
+    df = add_pubchem_data(df)
     try:
         df.to_csv(args.output_csv, index=False, sep=args.sep, encoding=args.encoding)
         logger.info("Wrote %d rows to %s", len(df), args.output_csv)
@@ -97,7 +166,7 @@ def run_chembl(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     """Create the command-line argument parser."""
-    parser = argparse.ArgumentParser(description="ChEMBL compound data utilities")
+    parser = argparse.ArgumentParser(description="ChEMBL and PubChem compound data utilities")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     parser.add_argument(
         "input_csv", type=Path, help="CSV file containing molecule identifiers"

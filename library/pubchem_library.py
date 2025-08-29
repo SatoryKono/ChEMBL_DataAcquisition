@@ -48,6 +48,71 @@ def url_encode(text: str) -> str:
     """
     return quote(text, safe="")
 
+def _cids_from_identifier_list(data: Dict[str, Any]) -> List[str]:
+    """Extract CIDs from a JSON ``IdentifierList`` structure."""
+
+    return [str(cid) for cid in data.get("IdentifierList", {}).get("CID", [])]
+
+
+def get_cid_from_smiles(smiles: str) -> Optional[str]:
+    """Retrieve PubChem CID(s) for a SMILES string.
+
+    Parameters
+    ----------
+    smiles: str
+        SMILES representation of a compound.
+
+    Returns
+    -------
+    str or None
+        Pipe-separated list of CIDs or ``None`` if the structure is
+        unknown to PubChem.
+    """
+
+    safe_smiles = url_encode(smiles)
+    url = (
+        "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/"
+        f"{safe_smiles}/cids/JSON"
+    )
+    response = make_request(url)
+    if not response:
+        return None
+    cids = _cids_from_identifier_list(response)
+    unique_cids = sorted(set(cids))
+    return "|".join(unique_cids) if unique_cids else None
+
+
+def get_cid_from_inchi(inchi: str) -> Optional[str]:
+    """Retrieve PubChem CID(s) for an InChI string."""
+
+    safe_inchi = url_encode(inchi)
+    url = (
+        "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/inchi/"
+        f"{safe_inchi}/cids/JSON"
+    )
+    response = make_request(url)
+    if not response:
+        return None
+    cids = _cids_from_identifier_list(response)
+    unique_cids = sorted(set(cids))
+    return "|".join(unique_cids) if unique_cids else None
+
+
+def get_cid_from_inchikey(inchikey: str) -> Optional[str]:
+    """Retrieve PubChem CID(s) for an InChIKey."""
+
+    safe_inchikey = url_encode(inchikey)
+    url = (
+        "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/inchikey/"
+        f"{safe_inchikey}/cids/JSON"
+    )
+    response = make_request(url)
+    if not response:
+        return None
+    cids = _cids_from_identifier_list(response)
+    unique_cids = sorted(set(cids))
+    return "|".join(unique_cids) if unique_cids else None
+
 
 def make_request(url: str, delay: float = 3.0) -> Optional[Dict[str, Any]]:
     """Make an HTTP GET request and return parsed JSON.
@@ -76,6 +141,9 @@ def make_request(url: str, delay: float = 3.0) -> Optional[Dict[str, Any]]:
         response = _session.get(url, timeout=10)
         if response.status_code == 404:
             logger.warning("Request returned 404 for url %s", url)
+            return None
+        if response.status_code == 400:
+            logger.warning("Request returned 400 for url %s", url)
             return None
         response.raise_for_status()
         try:

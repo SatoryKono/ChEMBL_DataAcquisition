@@ -438,6 +438,7 @@ def run_all(args: argparse.Namespace) -> int:
                     r.get("gene"),
                     r.get("chembl_alternative_name"),
                     r.get("names"),
+                    r.get("secondaryAccessionNames"),
                 ]
             ),
             axis=1,
