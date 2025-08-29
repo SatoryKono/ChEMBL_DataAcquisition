@@ -87,10 +87,20 @@ def add_pubchem_data(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     smiles_list = df["molecule_structures.canonical_smiles"].fillna("").tolist()
-    unique_smiles = {s for s in smiles_list if s}
+    # ``dict.fromkeys`` preserves the order of first occurrence while
+    # removing duplicates. This allows progress output to reflect the
+    # deterministic iteration order of SMILES strings.
+    unique_smiles = [s for s in dict.fromkeys(smiles_list) if s]
+
+    total = len(unique_smiles)
+    if total:
+        logger.info("Fetching PubChem data for %d unique SMILES", total)
+    else:
+        logger.info("No SMILES strings available for PubChem lookup")
 
     records: dict[str, dict[str, str]] = {}
-    for smi in unique_smiles:
+    for idx, smi in enumerate(unique_smiles, start=1):
+        logger.info("PubChem lookup %d/%d", idx, total)
         cid = pl.get_cid_from_smiles(smi) or ""
         first_cid = cid.split("|")[0] if cid else ""
         if first_cid:
@@ -153,8 +163,13 @@ def run_chembl(args: argparse.Namespace) -> int:
         logger.error("%s", exc)
         return 1
 
+    logger.info("Retrieved %d identifiers", len(ids))
+    logger.info("Fetching ChEMBL data in chunks of %d", args.chunk_size)
     df = cl.get_testitem(ids, chunk_size=args.chunk_size)
+    logger.info("Retrieved %d rows from ChEMBL", len(df))
+    logger.info("Augmenting results with PubChem data")
     df = add_pubchem_data(df)
+    logger.info("PubChem augmentation completed")
     try:
         df.to_csv(args.output_csv, index=False, sep=args.sep, encoding=args.encoding)
         logger.info("Wrote %d rows to %s", len(df), args.output_csv)
@@ -166,7 +181,9 @@ def run_chembl(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     """Create the command-line argument parser."""
-    parser = argparse.ArgumentParser(description="ChEMBL and PubChem compound data utilities")
+    parser = argparse.ArgumentParser(
+        description="ChEMBL and PubChem compound data utilities"
+    )
     parser.add_argument("--log-level", default="INFO", help="Logging level")
     parser.add_argument(
         "input_csv", type=Path, help="CSV file containing molecule identifiers"
