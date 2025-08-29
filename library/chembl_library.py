@@ -404,7 +404,8 @@ def get_assays_all(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
             if not df_chunk.empty:
                 records.append(df_chunk)
 
-    # If every request failed or returned only empty records, yield an empty frame
+    # Drop empty or all-NA frames to avoid pandas concat warnings
+    records = [r for r in records if not r.empty and not r.isna().all().all()]
 
     if not records:
         return pd.DataFrame(columns=ASSAY_COLUMNS)
@@ -457,8 +458,8 @@ def get_assays_notNull(ids: Iterable[str], chunk_size: int = 5) -> pd.DataFrame:
             if not df_chunk.empty:
                 records.append(df_chunk)
 
-    # If every request failed or returned only empty records, yield an empty frame
-
+    # Drop empty or all-NA frames to avoid pandas concat warnings
+    records = [r for r in records if not r.empty and not r.isna().all().all()]
     if not records:
         return pd.DataFrame(columns=ASSAY_COLUMNS)
 
