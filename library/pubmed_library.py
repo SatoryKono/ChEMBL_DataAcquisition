@@ -45,9 +45,10 @@ def _do_request(
     sleep: float,
     expect_json: bool = True,
     retries: int = 2,
+    method: str = "GET",
     **kwargs: Any,
 ) -> Tuple[Union[Dict[str, Any], str, None], str]:
-    """Perform a GET request with retry and error handling.
+    """Perform a GET or POST request with retry and error handling.
 
     Parameters
     ----------
@@ -61,15 +62,20 @@ def _do_request(
         Whether to parse the response as JSON.
     retries:
         Number of additional attempts after the initial one.
+    method:
+        HTTP method to use, either "GET" or "POST".
 
-    Any extra keyword arguments are forwarded to ``session.get``.
+    Any extra keyword arguments are forwarded to ``session.get`` or ``session.post``.
     """
     for attempt in range(retries + 1):
         if attempt:
             time.sleep(sleep * attempt)
         
         try:
-            resp = session.get(url, timeout=TIMEOUT, **kwargs)
+            if method.upper() == "POST":
+                resp = session.post(url, timeout=TIMEOUT, **kwargs)
+            else:
+                resp = session.get(url, timeout=TIMEOUT, **kwargs)
         except requests.RequestException as exc:
             if attempt >= retries:  # pragma: no cover - network errors
                 return None, str(exc)
@@ -375,6 +381,86 @@ def fetch_semantic_scholar(session: requests.Session, pmid: str, sleep: float) -
     }
 
 
+def fetch_semantic_scholar_batch(
+    session: requests.Session, pmids: List[str], sleep: float
+) -> List[Dict[str, str]]:
+    """Fetch metadata for multiple PMIDs using Semantic Scholar's batch API."""
+    fields = "publicationTypes,externalIds,paperId,venue"
+    headers = {"Accept": "application/json"}
+    url = "https://api.semanticscholar.org/graph/v1/paper/batch"
+
+    # Prepare PMID list for the API
+    prefixed_pmids = [f"PMID:{pmid}" for pmid in pmids]
+
+    # The API is sensitive to the request method, so we use session.post directly
+    # instead of _do_request, which is a GET wrapper. We'll add similar retry
+    # logic here.
+    data, error = _do_request(
+        session,
+        url,
+        sleep * 5,
+        headers=headers,
+        params={"fields": fields},
+        json={"ids": prefixed_pmids},
+        method="POST"  # This requires extending _do_request
+    )
+
+    if error:
+        return [
+            {
+                "scholar.PMID": pmid,
+                "scholar.Venue": "",
+                "scholar.PublicationTypes": "",
+                "scholar.SemanticScholarId": "",
+                "scholar.ExternalIds": "",
+                "scholar.DOI": "",
+                "scholar.Error": error,
+            }
+            for pmid in pmids
+        ]
+
+    results_map = {pmid: None for pmid in pmids}
+    if isinstance(data, list):
+        for item in data:
+            if item is None:
+                continue
+
+            # The API response doesn't directly include the PMID we queried by,
+            # so we have to find it in the externalIds
+            external_ids = item.get("externalIds") or {}
+            pmid_val = external_ids.get("PMID")
+            if pmid_val and pmid_val in results_map:
+                pubtypes = item.get("publicationTypes") or []
+                doi = external_ids.get("DOI") or ""
+                results_map[pmid_val] = {
+                    "scholar.PMID": pmid_val,
+                    "scholar.Venue": item.get("venue", ""),
+                    "scholar.PublicationTypes": "; ".join(pubtypes) if pubtypes else "",
+                    "scholar.SemanticScholarId": item.get("paperId", ""),
+                    "scholar.ExternalIds": json.dumps(external_ids, ensure_ascii=False),
+                    "scholar.DOI": doi,
+                    "scholar.Error": "",
+                }
+
+    final_results = []
+    for pmid in pmids:
+        if results_map[pmid]:
+            final_results.append(results_map[pmid])
+        else:
+            # Handle cases where a paper was not found or the mapping failed
+            final_results.append({
+                "scholar.PMID": pmid,
+                "scholar.Venue": "",
+                "scholar.PublicationTypes": "",
+                "scholar.SemanticScholarId": "",
+                "scholar.ExternalIds": "",
+                "scholar.DOI": "",
+                "scholar.Error": "Not found in batch response",
+            })
+
+    return final_results
+
+
 def fetch_openalex(session: requests.Session, pmid: str, sleep: float) -> Dict[str, str]:
     url = f"https://api.openalex.org/works/pmid:{pmid}"
     data, error = _do_request(session, url, sleep)
@@ -491,21 +577,34 @@ def main() -> None:
 
     pmids = read_pmids(args.input)
     records: List[Dict[str, str]] = []
+    batch_size = 100  # A reasonable batch size
     with requests.Session() as session:
-        for pmid in pmids:
-            pubmed = fetch_pubmed(session, pmid, args.sleep)
-            semsch = fetch_semantic_scholar(session, pmid, args.sleep)
-            openalex = fetch_openalex(session, pmid, args.sleep)
-            doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
-            crossref = fetch_crossref(session, doi, args.sleep)
-            combined: Dict[str, str] = {}
-            combined.update(pubmed)
-            combined.update(semsch)
-            combined.update(openalex)
-            combined.update(crossref)
-            # print_results expects a list of records, so wrap the single record
-            print_results([combined])
-            records.append(combined)
+        for i in range(0, len(pmids), batch_size):
+            batch_pmids = pmids[i:i + batch_size]
+
+            # Batch fetch PubMed and Semantic Scholar
+            pubmed_list = fetch_pubmed_batch(session, batch_pmids, args.sleep)
+            semsch_list = fetch_semantic_scholar_batch(session, batch_pmids, args.sleep)
+
+            semsch_map = {s.get("scholar.PMID"): s for s in semsch_list}
+
+            for pubmed in pubmed_list:
+                pmid = pubmed.get("PubMed.PMID", "")
+                semsch = semsch_map.get(pmid, {})
+
+                # Still fetching these individually
+                openalex = fetch_openalex(session, pmid, args.sleep)
+                doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
+                crossref = fetch_crossref(session, doi, args.sleep)
+
+                combined: Dict[str, str] = {}
+                combined.update(pubmed)
+                combined.update(semsch)
+                combined.update(openalex)
+                combined.update(crossref)
+
+                print_results([combined])
+                records.append(combined)
 
     all_keys = set()
     for rec in records:

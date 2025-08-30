@@ -122,13 +122,24 @@ def fetch_pubmed_records(
         try:
             with requests.Session() as session:
                 pubmed_list = pl.fetch_pubmed_batch(session, batch, sleep)
+                pmids_in_batch = [p.get("PubMed.PMID", "") for p in pubmed_list]
+
+                # Fetch Semantic Scholar data in a single batch
+                semsch_list = ssl.fetch_semantic_scholar_batch(session, pmids_in_batch, sleep)
+
+                # Create a map for easy lookup
+                semsch_map = {s.get("scholar.PMID"): s for s in semsch_list}
+
                 combined_records: list[dict[str, str]] = []
                 for pubmed in pubmed_list:
                     pmid = pubmed.get("PubMed.PMID", "")
-                    semsch = ssl.fetch_semantic_scholar(session, pmid, sleep)
+                    semsch = semsch_map.get(pmid, {})
+
+                    # Still fetching these individually for now
                     openalex = ocl.fetch_openalex(session, pmid, sleep)
                     doi = pubmed.get("PubMed.DOI") or semsch.get("scholar.DOI") or ""
                     crossref = ocl.fetch_crossref(session, doi, sleep)
+
                     combined: dict[str, str] = {}
                     combined.update(pubmed)
                     combined.update(semsch)

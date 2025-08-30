@@ -8,7 +8,7 @@ request retries.
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List
 import logging
 
 import requests
@@ -42,3 +42,26 @@ def fetch_semantic_scholar(
     """
 
     return _pl.fetch_semantic_scholar(session, pmid, sleep)
+
+
+def fetch_semantic_scholar_batch(
+    session: requests.Session, pmids: List[str], sleep: float
+) -> List[Dict[str, str]]:
+    """Return Semantic Scholar metadata for a batch of ``pmids``.
+
+    Parameters
+    ----------
+    session:
+        :class:`requests.Session` instance used for the HTTP call.
+    pmids:
+        A list of PubMed identifiers.
+    sleep:
+        Delay in seconds before making the request.
+
+    Returns
+    -------
+    list of dict
+        A list of metadata mappings. Errors are encoded within each
+        dictionary and never raise exceptions.
+    """
+    return _pl.fetch_semantic_scholar_batch(session, pmids, sleep)
