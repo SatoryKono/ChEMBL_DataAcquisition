@@ -73,6 +73,7 @@ TARGET_FIELDS = [
     "gene",
     "uniprot_id",
     "mapping_uniprot_id",
+    "mapping_uniprot_response",
     "chembl_alternative_name",
     "ec_code",
     "hgnc_name",
@@ -106,27 +107,32 @@ def _parse_alt_names(synonyms: list[dict[str, str]]) -> str:
     return "|".join(sorted(names))
 
 
-def _map_chembl_to_uniprot(chembl_id: str) -> str:
-    """Map a ChEMBL target ID to a UniProt accession.
+def _map_chembl_to_uniprot(chembl_id: str) -> tuple[str, str]:
+    """Map a ChEMBL target ID to a UniProt accession and capture the raw response.
 
     The UniProt ID mapping service is asynchronous. A job is submitted and
-    polled until completion. Network failures or missing mappings yield an
-    empty string.
+    polled until completion. The function returns a pair consisting of the
+    mapped UniProt accession (or an empty string if mapping fails) and the raw
+    text returned from the initial ``idmapping/run`` request. Network failures
+    or malformed responses yield empty strings accompanied by the textual error
+    message, if available.
     """
 
     if not chembl_id:
-        return ""
+        return "", ""
 
+    run_response = ""
     try:
         resp = _session.post(
             "https://rest.uniprot.org/idmapping/run",
             data={"from": "ChEMBL", "to": "UniProtKB", "ids": chembl_id},
             timeout=30,
         )
+        run_response = resp.text
         resp.raise_for_status()
         job_id = resp.json().get("jobId")
         if not job_id:
-            return ""
+            return "", run_response
         status_url = f"https://rest.uniprot.org/idmapping/status/{job_id}"
         result_url = f"https://rest.uniprot.org/idmapping/uniprotkb/results/{job_id}"
         for _ in range(10):
@@ -141,28 +147,34 @@ def _map_chembl_to_uniprot(chembl_id: str) -> str:
                 data = result_resp.json()
                 items = data.get("results") or []
                 if not items:
-                    return ""
+                    return "", run_response
                 to_field = items[0].get("to")
                 if isinstance(to_field, dict):
-                    return (
+                    mapped = (
                         to_field.get("primaryAccession")
                         or to_field.get("accession")
                         or ""
                     )
-                return to_field or ""
+                else:
+                    mapped = to_field or ""
+                return mapped, run_response
             if status.get("jobStatus") == "FAILED":
-                return ""
+                return "", run_response
             time.sleep(1)
     except requests.RequestException as exc:  # pragma: no cover - network
         logger.warning("UniProt mapping request failed for %s: %s", chembl_id, exc)
+        run_response = getattr(exc.response, "text", str(exc))
     except ValueError as exc:  # pragma: no cover - malformed JSON
         logger.warning(
             "Failed to decode UniProt mapping response for %s: %s", chembl_id, exc
         )
-    return ""
+        run_response = str(exc)
+    return "", run_response
 
 
-def _parse_uniprot_id(xrefs: list[dict[str, str]], chembl_id: str) -> tuple[str, str]:
+def _parse_uniprot_id(
+    xrefs: list[dict[str, str]], chembl_id: str
+) -> tuple[str, str, str]:
     """Return UniProt IDs from cross references and mapping.
 
     Parameters
@@ -174,8 +186,10 @@ def _parse_uniprot_id(xrefs: list[dict[str, str]], chembl_id: str) -> tuple[str,
 
     Returns
     -------
-    tuple[str, str]
-        A pair ``(uniprot_id, mapping_uniprot_id)``.
+    tuple[str, str, str]
+        A triple ``(uniprot_id, mapping_uniprot_id, mapping_response)`` where
+        ``mapping_response`` contains the raw text returned from the UniProt
+        ``idmapping/run`` request.
     """
 
     uniprot_id = ""
@@ -186,8 +200,8 @@ def _parse_uniprot_id(xrefs: list[dict[str, str]], chembl_id: str) -> tuple[str,
             if ident:
                 uniprot_id = ident
                 break
-    mapping_uniprot_id = _map_chembl_to_uniprot(chembl_id)
-    return uniprot_id, mapping_uniprot_id
+    mapping_uniprot_id, mapping_response = _map_chembl_to_uniprot(chembl_id)
+    return uniprot_id, mapping_uniprot_id, mapping_response
 
 
 
@@ -254,7 +268,7 @@ def _parse_target_record(data: dict[str, Any]) -> dict[str, Any]:
     gene = _parse_gene_synonyms(synonyms)
     ec_code = _parse_ec_codes(synonyms)
     alt_name = _parse_alt_names(synonyms)
-    uniprot_id, mapping_uniprot_id = _parse_uniprot_id(
+    uniprot_id, mapping_uniprot_id, mapping_response = _parse_uniprot_id(
         xrefs, data.get("target_chembl_id", "")
     )
     hgnc_name, hgnc_id = _parse_hgnc(xrefs)
@@ -268,6 +282,7 @@ def _parse_target_record(data: dict[str, Any]) -> dict[str, Any]:
         "gene": gene,
         "uniprot_id": uniprot_id,
         "mapping_uniprot_id": mapping_uniprot_id,
+        "mapping_uniprot_response": mapping_response,
         "chembl_alternative_name": alt_name,
         "ec_code": ec_code,
         "hgnc_name": hgnc_name,
@@ -287,10 +302,11 @@ def get_target(chembl_target_id: str) -> dict[str, Any]:
     -------
     dict
         A dictionary containing information about the target, including
-        both a ``uniprot_id`` parsed from cross references and a
-        ``mapping_uniprot_id`` obtained via the UniProt ID mapping service.
-        If the request fails an empty dictionary with pre-defined keys is
-        returned.
+        both a ``uniprot_id`` parsed from cross references, a
+        ``mapping_uniprot_id`` obtained via the UniProt ID mapping service,
+        and a ``mapping_uniprot_response`` with the raw response text from the
+        mapping request. If the request fails an empty dictionary with
+        pre-defined keys is returned.
     """
     if chembl_target_id in {"", "#N/A"}:
         return dict(EMPTY_TARGET)

@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import json
 import pandas as pd
 import pytest
 
@@ -17,6 +18,7 @@ class FakeResponse:
     def __init__(self, data):
         self._data = data
         self.status_code = 200
+        self.text = json.dumps(data)
 
     def raise_for_status(self) -> None:
         return None
@@ -71,6 +73,7 @@ SAMPLE_DF = pd.DataFrame(
         "gene": ["MAP3K14"],
         "uniprot_id": ["Q99558"],
         "mapping_uniprot_id": ["Q99558"],
+        "mapping_uniprot_response": ["{\"jobId\": \"job\"}"],
         "chembl_alternative_name": ["NIK"],
         "ec_code": ["2.7.11.25"],
         "hgnc_name": ["MAP3K14"],
@@ -104,27 +107,30 @@ def test_map_chembl_to_uniprot(monkeypatch) -> None:
     monkeypatch.setattr(cl._session, "get", fake_get)
     monkeypatch.setattr(cl.time, "sleep", lambda _x: None)
 
-    acc = cl._map_chembl_to_uniprot("CHEMBL25")
+    acc, raw = cl._map_chembl_to_uniprot("CHEMBL25")
     assert acc == "Q99558"
+    assert raw == "{\"jobId\": \"job\"}"
     assert called["post"]["from"] == "ChEMBL"
 
 
 def test_get_target(monkeypatch) -> None:
     monkeypatch.setattr(cl._session, "get", lambda url, timeout=30: FakeResponse(SAMPLE_JSON))
-    monkeypatch.setattr(cl, "_map_chembl_to_uniprot", lambda cid: "Q99558")
+    monkeypatch.setattr(cl, "_map_chembl_to_uniprot", lambda cid: ("Q99558", "{\"jobId\":\"job\"}"))
     data = cl.get_target(SAMPLE_ID)
     assert data["uniprot_id"] == "Q99558"
     assert data["mapping_uniprot_id"] == "Q99558"
+    assert data["mapping_uniprot_response"] == "{\"jobId\":\"job\"}"
     assert data["gene"] == "MAP3K14|NIK"
 
 
 def test_get_targets(monkeypatch) -> None:
     bulk_json = {"targets": [SAMPLE_JSON]}
     monkeypatch.setattr(cl._session, "get", lambda url, timeout=30: FakeResponse(bulk_json))
-    monkeypatch.setattr(cl, "_map_chembl_to_uniprot", lambda cid: "Q99558")
+    monkeypatch.setattr(cl, "_map_chembl_to_uniprot", lambda cid: ("Q99558", "{\"jobId\":\"job\"}"))
     df = cl.get_targets([SAMPLE_ID])
     assert df.loc[0, "uniprot_id"] == "Q99558"
     assert df.loc[0, "mapping_uniprot_id"] == "Q99558"
+    assert df.loc[0, "mapping_uniprot_response"] == "{\"jobId\":\"job\"}"
     assert df.shape[0] == 1
 
 

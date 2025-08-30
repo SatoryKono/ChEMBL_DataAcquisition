@@ -26,6 +26,7 @@ def _sample_chembl_df() -> pd.DataFrame:
             "gene": ["MAP3K14"],
             "uniprot_id": ["Q99558"],
             "mapping_uniprot_id": ["Q99558"],
+            "mapping_uniprot_response": ["{\"jobId\": \"job\"}"],
             "chembl_alternative_name": ["NIK"],
             "ec_code": ["2.7.11.25"],
             "hgnc_name": ["MAP3K14"],
