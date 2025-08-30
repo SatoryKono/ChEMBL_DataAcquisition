@@ -120,7 +120,7 @@ def _map_chembl_to_uniprot(chembl_id: str) -> str:
     try:
         resp = _session.post(
             "https://rest.uniprot.org/idmapping/run",
-            data={"from": "ChEMBL_ID", "to": "UniProtKB", "ids": chembl_id},
+            data={"from": "Chembl", "to": "UniProtKB", "ids": chembl_id},
             timeout=30,
         )
         resp.raise_for_status()

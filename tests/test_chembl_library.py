@@ -88,6 +88,27 @@ def test_chunked_invalid_size() -> None:
         list(cl._chunked([1], 0))
 
 
+def test_map_chembl_to_uniprot(monkeypatch) -> None:
+    called: dict[str, dict[str, str]] = {}
+
+    def fake_post(url: str, data: dict[str, str], timeout: int = 30) -> FakeResponse:
+        called["post"] = data
+        return FakeResponse({"jobId": "job"})
+
+    def fake_get(url: str, timeout: int = 30) -> FakeResponse:
+        if "status" in url:
+            return FakeResponse({"jobStatus": "FINISHED"})
+        return FakeResponse({"results": [{"to": "Q99558"}]})
+
+    monkeypatch.setattr(cl._session, "post", fake_post)
+    monkeypatch.setattr(cl._session, "get", fake_get)
+    monkeypatch.setattr(cl.time, "sleep", lambda _x: None)
+
+    acc = cl._map_chembl_to_uniprot("CHEMBL25")
+    assert acc == "Q99558"
+    assert called["post"]["from"] == "Chembl"
+
+
 def test_get_target(monkeypatch) -> None:
     monkeypatch.setattr(cl._session, "get", lambda url, timeout=30: FakeResponse(SAMPLE_JSON))
     monkeypatch.setattr(cl, "_map_chembl_to_uniprot", lambda cid: "Q99558")
