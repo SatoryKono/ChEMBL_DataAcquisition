@@ -134,13 +134,22 @@ def _map_chembl_to_uniprot(chembl_id: str) -> str:
             status_resp.raise_for_status()
             status = status_resp.json()
             if status.get("jobStatus") == "FINISHED":
-                result_resp = _session.get(result_url, params={"format": "json"}, timeout=30)
+                result_resp = _session.get(
+                    result_url, params={"format": "json"}, timeout=30
+                )
                 result_resp.raise_for_status()
                 data = result_resp.json()
                 items = data.get("results") or []
-                if items:
-                    return items[0].get("to", "")
-                return ""
+                if not items:
+                    return ""
+                to_field = items[0].get("to")
+                if isinstance(to_field, dict):
+                    return (
+                        to_field.get("primaryAccession")
+                        or to_field.get("accession")
+                        or ""
+                    )
+                return to_field or ""
             if status.get("jobStatus") == "FAILED":
                 return ""
             time.sleep(1)

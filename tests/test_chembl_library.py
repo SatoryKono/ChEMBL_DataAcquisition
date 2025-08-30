@@ -98,7 +98,7 @@ def test_map_chembl_to_uniprot(monkeypatch) -> None:
     def fake_get(url: str, timeout: int = 30, **_: dict[str, str]) -> FakeResponse:
         if "status" in url:
             return FakeResponse({"jobStatus": "FINISHED"})
-        return FakeResponse({"results": [{"to": "Q99558"}]})
+        return FakeResponse({"results": [{"to": {"primaryAccession": "Q99558"}}]})
 
     monkeypatch.setattr(cl._session, "post", fake_post)
     monkeypatch.setattr(cl._session, "get", fake_get)
