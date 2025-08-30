@@ -312,41 +312,47 @@ def run_uniprot(args: argparse.Namespace) -> int:
     int
         Zero on success, non-zero on failure.
     """
-
     try:
-        input_csv = args.input_csv
-        if args.column != "uniprot_id":
-            ids = read_ids(
-                input_csv, column=args.column, sep=args.sep, encoding=args.encoding
+        df = pd.read_csv(args.input_csv, sep=args.sep, encoding=args.encoding, dtype=str)
+        if args.column not in df.columns:
+            raise ValueError(f"column '{args.column}' not found in {args.input_csv}")
+        df = df.fillna("")
+        df = df[
+            (df[args.column].str.strip() != "")
+            & (df[args.column] != "#N/A")
+        ].reset_index(drop=True)
+        ids = df[args.column].tolist()
+
+        from tempfile import NamedTemporaryFile
+
+        with NamedTemporaryFile(
+            "w", delete=False, encoding=args.encoding, newline=""
+        ) as tmp:
+            writer = csv.DictWriter(tmp, fieldnames=["uniprot_id"], delimiter=args.sep)
+            writer.writeheader()
+            for uid in ids:
+                writer.writerow({"uniprot_id": uid})
+            tmp_path = Path(tmp.name)
+
+        try:
+            uu.process(
+                input_csv=str(tmp_path),
+                output_csv=str(args.output_csv),
+                data_dir=str(args.data_dir),
+                sep=args.sep,
+                encoding=args.encoding,
             )
-            from tempfile import NamedTemporaryFile
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
-            with NamedTemporaryFile(
-                "w", delete=False, encoding=args.encoding, newline=""
-            ) as tmp:
-                writer = csv.DictWriter(tmp, fieldnames=["uniprot_id"], delimiter=args.sep)
-                writer.writeheader()
-                for uid in ids:
-                    writer.writerow({"uniprot_id": uid})
-                input_csv = Path(tmp.name)
-
-        uu.process(
-            input_csv=str(input_csv),
-            output_csv=str(args.output_csv),
-            data_dir=str(args.data_dir),
-            sep=args.sep,
-            encoding=args.encoding,
+        out_df = pd.read_csv(
+            args.output_csv, sep=args.sep, encoding=args.encoding, dtype=str
         )
-
-        if args.column != "uniprot_id":
-            out_df = pd.read_csv(
-                args.output_csv, sep=args.sep, encoding=args.encoding, dtype=str
-            )
-            out_df.insert(1, args.column, ids)
-            out_df.to_csv(
-                args.output_csv, index=False, sep=args.sep, encoding=args.encoding
-            )
-            input_csv.unlink(missing_ok=True)
+        if "mapping_uniprot_id" in df.columns:
+            out_df.insert(1, "mapping_uniprot_id", df["mapping_uniprot_id"].tolist())
+        out_df.to_csv(
+            args.output_csv, index=False, sep=args.sep, encoding=args.encoding
+        )
         return 0
     except (FileNotFoundError, ValueError, OSError) as exc:
         logger.error("%s", exc)

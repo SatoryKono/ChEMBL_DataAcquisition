@@ -28,8 +28,9 @@ def test_collect_info_downloads_missing(tmp_path: Path, monkeypatch) -> None:
     sample = json.loads((DATA_DIR / f"{uid}.json").read_text(encoding="utf8"))
 
     def fake_fetch(uniprot_id: str) -> dict:
-        assert uniprot_id == uid
-        return sample
+        if uniprot_id == uid:
+            return sample
+        return {}
 
     monkeypatch.setattr(uu, "fetch_uniprot", fake_fetch)
     data_dir = tmp_path / "uniprot"

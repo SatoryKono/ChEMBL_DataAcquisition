@@ -45,6 +45,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from .uniprot_id_mapping import map_chembl_to_uniprot
+
 # Configure module level logger
 logger = logging.getLogger(__name__)
 
@@ -106,53 +108,6 @@ def _parse_alt_names(synonyms: list[dict[str, str]]) -> str:
     return "|".join(sorted(names))
 
 
-def _map_chembl_to_uniprot(chembl_id: str) -> str:
-    """Map a ChEMBL target ID to a UniProt accession.
-
-    The UniProt ID mapping service is asynchronous. A job is submitted and
-    polled until completion. Network failures or missing mappings yield an
-    empty string.
-    """
-
-    if not chembl_id:
-        return ""
-
-    try:
-        resp = _session.post(
-            "https://rest.uniprot.org/idmapping/run",
-            data={"from": "ChEMBL", "to": "UniProtKB", "ids": chembl_id},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        job_id = resp.json().get("jobId")
-        if not job_id:
-            return ""
-        status_url = f"https://rest.uniprot.org/idmapping/status/{job_id}"
-        result_url = f"https://rest.uniprot.org/idmapping/uniprotkb/results/{job_id}"
-        for _ in range(10):
-            status_resp = _session.get(status_url, timeout=30)
-            status_resp.raise_for_status()
-            status = status_resp.json()
-            if status.get("jobStatus") == "FINISHED":
-                result_resp = _session.get(result_url, timeout=30)
-                result_resp.raise_for_status()
-                data = result_resp.json()
-                items = data.get("results") or []
-                if items:
-                    return items[0].get("to", "")
-                return ""
-            if status.get("jobStatus") == "FAILED":
-                return ""
-            time.sleep(1)
-    except requests.RequestException as exc:  # pragma: no cover - network
-        logger.warning("UniProt mapping request failed for %s: %s", chembl_id, exc)
-    except ValueError as exc:  # pragma: no cover - malformed JSON
-        logger.warning(
-            "Failed to decode UniProt mapping response for %s: %s", chembl_id, exc
-        )
-    return ""
-
-
 def _parse_uniprot_id(xrefs: list[dict[str, str]], chembl_id: str) -> tuple[str, str]:
     """Return UniProt IDs from cross references and mapping.
 
@@ -177,7 +132,11 @@ def _parse_uniprot_id(xrefs: list[dict[str, str]], chembl_id: str) -> tuple[str,
             if ident:
                 uniprot_id = ident
                 break
-    mapping_uniprot_id = _map_chembl_to_uniprot(chembl_id)
+    try:
+        mapping_uniprot_id = map_chembl_to_uniprot(chembl_id)
+    except Exception as exc:  # pragma: no cover - network failure paths
+        logger.warning("UniProt mapping request failed for %s: %s", chembl_id, exc)
+        mapping_uniprot_id = ""
     return uniprot_id, mapping_uniprot_id
 
 

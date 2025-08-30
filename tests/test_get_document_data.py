@@ -25,7 +25,9 @@ def _sample_pub_df() -> pd.DataFrame:
 
 def test_run_all_merges_types(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cl, "get_documents", lambda ids, chunk_size=5: _sample_doc_df())
-    monkeypatch.setattr(gdd, "fetch_pubmed_records", lambda pmids, sleep: _sample_pub_df())
+    monkeypatch.setattr(
+        gdd, "fetch_pubmed_records", lambda pmids, sleep, workers, batch_size: _sample_pub_df()
+    )
 
     input_csv = tmp_path / "docs.csv"
     input_csv.write_text("chembl_id\nCHEMBL100\n", encoding="utf8")
@@ -39,6 +41,8 @@ def test_run_all_merges_types(monkeypatch, tmp_path: Path) -> None:
         encoding="utf8",
         chunk_size=5,
         sleep=0.0,
+        workers=1,
+        batch_size=100,
     )
     assert gdd.run_all(args) == 0
     df = pd.read_csv(output_csv, dtype=str)
