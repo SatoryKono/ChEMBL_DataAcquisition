@@ -26,7 +26,9 @@ def test_read_ids(tmp_path: Path) -> None:
 
 
 def test_run_chembl(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(cl, "get_assays", lambda ids, chunk_size=5: _sample_assay_df())
+    monkeypatch.setattr(
+        cl, "get_assays_all", lambda ids, chunk_size=5: _sample_assay_df()
+    )
     input_csv = tmp_path / "assays.csv"
     input_csv.write_text("assay_chembl_id\nCHEMBL123\n", encoding="utf8")
     output_csv = tmp_path / "out.csv"

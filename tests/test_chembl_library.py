@@ -70,12 +70,20 @@ SAMPLE_DF = pd.DataFrame(
         "relationship": ["single"],
         "gene": ["MAP3K14"],
         "uniprot_id": ["Q99558"],
+        "mapping_uniprot_id": ["P12345"],
         "chembl_alternative_name": ["NIK"],
         "ec_code": ["2.7.11.25"],
         "hgnc_name": ["MAP3K14"],
         "hgnc_id": ["6853"],
     }
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_mapping(monkeypatch) -> None:
+    """Always return a fixed UniProt ID for mapping in tests."""
+
+    monkeypatch.setattr(cl, "map_chembl_to_uniprot", lambda cid: "P12345")
 
 
 def test_chunked_splits_list() -> None:
@@ -92,6 +100,7 @@ def test_get_target(monkeypatch) -> None:
     data = cl.get_target(SAMPLE_ID)
     assert data["uniprot_id"] == "Q99558"
     assert data["gene"] == "MAP3K14|NIK"
+    assert data["mapping_uniprot_id"] == "P12345"
 
 
 def test_get_targets(monkeypatch) -> None:
@@ -99,6 +108,7 @@ def test_get_targets(monkeypatch) -> None:
     monkeypatch.setattr(cl._session, "get", lambda url, timeout=30: FakeResponse(bulk_json))
     df = cl.get_targets([SAMPLE_ID])
     assert df.loc[0, "uniprot_id"] == "Q99558"
+    assert df.loc[0, "mapping_uniprot_id"] == "P12345"
     assert df.shape[0] == 1
 
 
