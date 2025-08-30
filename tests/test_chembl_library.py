@@ -95,7 +95,7 @@ def test_map_chembl_to_uniprot(monkeypatch) -> None:
         called["post"] = data
         return FakeResponse({"jobId": "job"})
 
-    def fake_get(url: str, timeout: int = 30) -> FakeResponse:
+    def fake_get(url: str, timeout: int = 30, **_: dict[str, str]) -> FakeResponse:
         if "status" in url:
             return FakeResponse({"jobStatus": "FINISHED"})
         return FakeResponse({"results": [{"to": "Q99558"}]})
@@ -106,7 +106,7 @@ def test_map_chembl_to_uniprot(monkeypatch) -> None:
 
     acc = cl._map_chembl_to_uniprot("CHEMBL25")
     assert acc == "Q99558"
-    assert called["post"]["from"] == "Chembl"
+    assert called["post"]["from"] == "ChEMBL"
 
 
 def test_get_target(monkeypatch) -> None:

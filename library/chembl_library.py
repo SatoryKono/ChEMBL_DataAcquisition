@@ -120,7 +120,7 @@ def _map_chembl_to_uniprot(chembl_id: str) -> str:
     try:
         resp = _session.post(
             "https://rest.uniprot.org/idmapping/run",
-            data={"from": "Chembl", "to": "UniProtKB", "ids": chembl_id},
+            data={"from": "ChEMBL", "to": "UniProtKB", "ids": chembl_id},
             timeout=30,
         )
         resp.raise_for_status()
@@ -134,7 +134,7 @@ def _map_chembl_to_uniprot(chembl_id: str) -> str:
             status_resp.raise_for_status()
             status = status_resp.json()
             if status.get("jobStatus") == "FINISHED":
-                result_resp = _session.get(result_url, timeout=30)
+                result_resp = _session.get(result_url, params={"format": "json"}, timeout=30)
                 result_resp.raise_for_status()
                 data = result_resp.json()
                 items = data.get("results") or []
